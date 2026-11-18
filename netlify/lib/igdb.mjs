@@ -53,8 +53,11 @@ export function pickArtwork(g, size = 't_1080p') {
     .filter(a => a.image_id && (a.artwork_type == null || a.artwork_type in rank))
     .map(a => {
       const ratio = a.width && a.height ? a.width / a.height : 1.5;
-      // Liggend (breder dan ~4:3) gaat voor; daarbinnen het type, dan de grootte
-      return { a, score: (ratio >= 1.25 ? 0 : 10) + (rank[a.artwork_type] ?? 1) - Math.min(a.width || 0, 3840) / 10000 };
+      // Liggend (breder dan ~4:3) gaat voor, maar geen panorama's (die worden in de kop enorm uitvergroot
+      // en dus wazig); daarbinnen zo dicht mogelijk bij 16:9, het type, dan de grootte
+      const score = (ratio >= 1.25 ? 0 : 10) + (ratio > 2.4 ? 5 : 0) + Math.abs(ratio - 16 / 9)
+        + (rank[a.artwork_type] ?? 1) + ((a.width || 0) < 1000 ? 2 : 0) - Math.min(a.width || 0, 3840) / 10000;
+      return { a, score };
     })
     .sort((x, y) => x.score - y.score);
   const best = arts.find(x => x.score < 10)?.a || g.screenshots?.[0] || arts[0]?.a;

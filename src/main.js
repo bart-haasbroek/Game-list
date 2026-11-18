@@ -9,7 +9,7 @@ import {
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
 import { loadExtras, extrasFor } from './extras.js';
 import { loadHltb, hltbFor } from './hltb.js';
-import { mountNotes, detachNotes, destroyNotes } from './notes.js';
+import { mountNotes, destroyNotes, notesPreviewHTML, notesText } from './notes.js';
 
 const APP_VERSION = '3.1.0';
 const COVER_CACHE = 'covers-v2';
@@ -57,6 +57,20 @@ const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
 const NEEDS_RELEASE = ['playing', 'finished', 'completed', 'stopped'];
 // Uitgespeeld of compleet: allebei 'klaar' (uitspeeldatum, 'uitgespeeld in <jaar>', Laatst uitgespeeld)
 const DONE = ['finished', 'completed'];
+// Slimme lijstkeuze op de info-pagina: alleen de stappen die logisch volgen op waar de game nu staat,
+// met een passende tekst. De rest zit achter "Andere lijst".
+// [lijst, tekst] — de tekst valt terug op de korte lijstnaam
+const WANT = ['wishlist', 'interested']; // lijsten voor games die je (nog) niet hebt
+const NEXT_STEPS = {
+  none:       [['wishlist'], ['interested'], ['backlog', 'Heb ik'], ['playing'], ['finished']],
+  wishlist:   [['backlog', 'Gekocht'], ['playing'], ['finished', 'Al gespeeld'], ['interested', 'Toch niet']],
+  interested: [['wishlist'], ['backlog', 'Heb ik'], ['playing'], ['finished', 'Al gespeeld']],
+  backlog:    [['playing', 'Begonnen'], ['finished', 'Al gespeeld'], ['completed']],
+  playing:    [['finished', 'Uitgespeeld!'], ['completed'], ['stopped', 'Gestopt'], ['backlog', 'Pauze']],
+  finished:   [['completed', '100% gehaald'], ['playing', 'Opnieuw spelen']],
+  completed:  [['playing', 'Opnieuw spelen'], ['finished', 'Toch niet 100%']],
+  stopped:    [['playing', 'Weer oppakken'], ['finished', 'Toch uitgespeeld'], ['backlog', 'Later verder']],
+};
 const TABS = [
   { id: 'home', label: 'Home' },
   { id: 'library', label: 'Bibliotheek' },
@@ -104,7 +118,7 @@ const bare = (g) => JSON.stringify({ ...g, updatedAt: undefined });
 let snapshot = new Map(games.map(g => [g.id, bare(g)]));
 // Voor de sync alleen wat van jou is (status, cijfer, notities, datums, platform, eigen cover/trailer)
 // plus waarmee de game te herkennen is. Gegevens uit IGDB/Wikipedia haalt elk toestel zelf op.
-const FETCHED = ['info', 'artwork'];
+const FETCHED = ['info', 'artwork', 'artworkV'];
 const FETCHED_IGDB = ['summary', 'genres', 'franchise', 'wikiTitle', 'nlTitle', 'youtube', 'qid', 'coverFile'];
 function slimGame(g) {
   const out = { ...g };
@@ -495,18 +509,33 @@ function heroGame(playing) {
 
 // Liggende afbeelding (artwork) van IGDB, één keer per game opgehaald en bij de game bewaard
 const artworkTried = new Set();
+const ARTWORK_V = 2;
 async function ensureArtwork(g) {
-  if (!g || g.artwork !== undefined || !g.igdbId || !online() || artworkTried.has(g.id)) return;
+  // artworkV: versie van de keuze; bij een betere keuze-regel (v2: geen panorama's) opnieuw ophalen
+  if (!g || (g.artwork !== undefined && g.artworkV === ARTWORK_V) || !g.igdbId || !online() || artworkTried.has(g.id)) return;
   artworkTried.add(g.id);
   try {
-    const res = await fetch('/api/game?id=' + encodeURIComponent(g.igdbId));
+    const res = await fetch(`/api/game?id=${encodeURIComponent(g.igdbId)}&art=${ARTWORK_V}`);
     if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) return; // bv. yarn dev zonder functions
     const d = await res.json();
-    const patch = { artwork: d.artwork || null };
+    const patch = { artwork: d.artwork || null, artworkV: ARTWORK_V };
     if (g.info && !g.info.playtime && d.playtime) patch.info = { ...g.info, playtime: d.playtime, critic: d.critic || g.info.critic };
     updateGame(g.id, patch, { silent: true });
     if (prefs.tab === 'home' && $('#detailScreen').hidden) renderHome();
   } catch {}
+}
+
+// Afbeelding voor de grote kop: precies op maat van het vak (breedte × hoogte × pixeldichtheid), uitgesneden
+// door de image-CDN. Een liggende foto in een staand vak moet op hoogte passen, dus de bron moet groot genoeg
+// zijn: daarom het origineel van IGDB als bron, de telefoon krijgt alleen het uitgesneden stuk binnen.
+function heroImgUrl(src) {
+  if (!IMAGE_CDN) return src;
+  const desk = innerWidth >= 1024;
+  const dpr = Math.min(devicePixelRatio || 1, 3);
+  const up = (n) => Math.ceil(n * dpr / 100) * 100; // afronden, zodat de cache vaker raak is
+  const w = up(desk ? Math.min(innerWidth - 240 - 64, 1100) : innerWidth);
+  const h = up((desk ? 440 : Math.min(innerHeight * 0.62, 500)) * 1.15); // +15%: ruimte voor pull-to-zoom
+  return `/.netlify/images?url=${encodeURIComponent(src.replace('/t_1080p/', '/t_original/'))}&w=${w}&h=${h}&fit=cover&fm=webp&q=72`;
 }
 
 function heroHTML(g) {
@@ -529,7 +558,11 @@ function heroHTML(g) {
   const hours = pt && (pt.main || pt.plus || pt.complete);
   const genre = (g.info?.genres?.length ? g.info.genres : g.genres || [])[0];
   const line = [genre, platLabel(g)].filter(Boolean).join(' · ');
-  const art = g.artwork ? imgUrl(g.artwork, 1280) : null;
+  // Lange titels: editie ("- Nintendo Switch 2 Edition") op een eigen, kleinere regel; lettergrootte naar lengte
+  const m = g.title.match(/^(.{8,}?)\s+[-–—]\s+(.+)$/);
+  const [main, edition] = m ? [m[1], m[2]] : [g.title, ''];
+  const size = main.length > 44 ? 'text-[24px]' : main.length > 30 ? 'text-[27px]' : 'text-[30px]';
+  const art = g.artwork ? heroImgUrl(g.artwork) : null;
   const cover = coverSrc(g);
   const bg = art || (cover ? imgUrl(cover) : null);
   return `<div id="hero" class="home-hero relative -mx-4 overflow-hidden bg-surface" style="height:var(--hero-h)">
@@ -539,7 +572,8 @@ function heroHTML(g) {
     ${title}
     ${art ? '' : cover ? `<div class="absolute left-1/2 top-[44%] z-[1] w-[34%] max-w-[170px] -translate-x-1/2 -translate-y-1/2">${coverHTML(g, { cls: 'shadow-2xl! shadow-black/60!', placeholder: false })}</div>` : ''}
     <button data-open="${g.id}" class="absolute inset-x-0 bottom-0 z-[2] px-4 pb-5 pr-20 text-left">
-      <div class="line-clamp-2 text-[30px] font-black leading-[1.05] tracking-tight [text-shadow:0_2px_16px_rgba(0,0,0,.6)]">${esc(g.title)}</div>
+      <div class="line-clamp-3 ${size} font-black leading-[1.05] tracking-tight [text-shadow:0_2px_16px_rgba(0,0,0,.6)]">${esc(main)}</div>
+      ${edition ? `<div class="mt-1 text-[16px] font-bold text-white/90 [text-shadow:0_1px_8px_rgba(0,0,0,.6)]">${esc(edition)}</div>` : ''}
       ${line ? `<div class="mt-2 text-[15px] font-medium text-white/85">${esc(line)}</div>` : ''}
       ${hours ? `<div class="text-[14px] text-white/65">~${fmtHours(hours)} om uit te spelen</div>` : ''}
     </button>
@@ -1414,10 +1448,25 @@ function renderDetail() {
 
   // Nog niet uit: spelen, uitspelen of ermee stoppen kan nog niet
   const notOut = isFuture(g.release);
-  const statusBtns = LISTS.map(l => {
-    const off = notOut && NEEDS_RELEASE.includes(l.id) && g.status !== l.id;
-    return `<button data-status="${l.id}" ${off ? 'disabled' : ''} class="flex flex-col items-center gap-1 rounded-xl px-0.5 py-2.5 text-[10.5px] font-semibold disabled:opacity-35 ${owned && g.status === l.id ? 'bg-accent text-white' : 'bg-surface text-muted'}">${ICONS[l.id]}${l.short}</button>`;
-  }).join('');
+  const cur = owned ? g.status : null;
+  const steps = (NEXT_STEPS[cur || 'none']).filter(([id]) => !(notOut && NEEDS_RELEASE.includes(id)))
+    .map(([id, text]) => (notOut && id === 'backlog' ? [id, 'Besteld'] : [id, text])); // nog niet uit: "op de plank" = besteld
+  const shown = new Set([cur, ...steps.map(([id]) => id)]);
+  // Heb je de game al (op de plank, gespeeld…), dan zijn Wishlist en Interessant geen optie meer
+  const have = cur && !WANT.includes(cur);
+  const others = LISTS.filter(l => !shown.has(l.id) && !(notOut && NEEDS_RELEASE.includes(l.id)) && !(have && WANT.includes(l.id)));
+  const stepBtn = (id, text, extra = '') => `<button data-status="${id}" class="flex min-w-0 flex-col items-center gap-1 rounded-xl bg-surface px-0.5 py-2.5 text-[10.5px] font-semibold text-ink active:scale-95 [&_svg]:size-5 ${extra}" ><span style="color:${LIST_COLORS[id]}">${ICONS[id]}</span><span class="max-w-full truncate">${esc(text || listById[id].short)}</span></button>`;
+  const statusBtns = `
+    ${cur ? `<div class="mb-2 flex items-center gap-2.5 rounded-xl px-3 py-2.5" style="background:${LIST_COLORS[cur]}1f">
+      <span class="grid size-8 flex-none place-items-center rounded-full [&_svg]:size-[18px]" style="background:${LIST_COLORS[cur]}33;color:${LIST_COLORS[cur]}">${ICONS[cur]}</span>
+      <div class="min-w-0 flex-1 leading-tight"><div class="text-[11px] text-muted">Staat op</div><b class="text-[15px]">${listById[cur].label}</b></div>
+      ${steps.length ? '<span class="text-[11px] text-muted">Volgende stap ↓</span>' : ''}
+    </div>` : ''}
+    <div class="grid grid-cols-4 gap-1.5">${steps.map(([id, text]) => stepBtn(id, text)).join('')}</div>
+    ${others.length ? `<details class="group mt-1.5">
+      <summary class="flex cursor-pointer list-none items-center gap-1 py-1.5 text-[12px] font-semibold text-muted [&::-webkit-details-marker]:hidden">Andere lijst<span class="transition-transform group-open:rotate-90">›</span></summary>
+      <div class="grid grid-cols-4 gap-1.5 pt-1">${others.map(l => stepBtn(l.id, l.short, 'opacity-80')).join('')}</div>
+    </details>` : ''}`;
 
   const ratingBtns = Array.from({ length: 11 }, (_, i) => {
     const on = g.rating != null && i <= g.rating;
@@ -1447,7 +1496,6 @@ function renderDetail() {
         <span><b class="text-ink">Je bent offline.</b> Beschrijving, ontwikkelaar en trailer worden opgehaald zodra je weer internet hebt.</span>
       </div>` : '';
 
-  detachNotes(); // editor bewaren, niet opnieuw maken (anders verlies je de cursor tijdens het typen)
   $('#detailBody').innerHTML = `${offlineNote}
     <div class="flex items-end gap-4">
       ${coverHTML(g, { cls: 'w-[120px] flex-none' })}
@@ -1478,7 +1526,7 @@ function renderDetail() {
 
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
-      <div class="grid grid-cols-4 gap-1.5">${statusBtns}</div>
+      ${statusBtns}
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
@@ -1491,7 +1539,18 @@ function renderDetail() {
       </div>
     </div>` : ''}
 
-    ${owned ? `<div class="mt-6">${label('Notities & voortgang')}<div id="notesMount"></div></div>` : ''}
+    ${owned ? `<div class="mt-6">${label('Notities & voortgang')}${notesText(g.notes)
+      // Voorbeeld: tik om schermvullend te lezen en te bewerken
+      ? `<button data-notes-open class="relative block max-h-[260px] w-full overflow-hidden rounded-xl bg-surface text-left active:scale-[.99]">
+          <div class="notes-editor pointer-events-none">${notesPreviewHTML(g.notes)}</div>
+          <div class="absolute inset-x-0 bottom-0 flex items-end justify-end bg-gradient-to-t from-surface from-30% to-transparent px-3.5 pb-3 pt-12">
+            <span class="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-[13px] font-semibold [&_svg]:size-4">${svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>')}Openen</span>
+          </div>
+        </button>`
+      : `<button data-notes-open class="flex w-full items-center gap-3 rounded-xl border border-dashed border-line p-4 text-left text-muted active:scale-[.99] [&>svg]:size-5">
+          ${svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>')}
+          <span><b class="block text-ink">Notities toevoegen</b><span class="text-[12.5px]">Waar ben je gebleven, tips, een afvinklijstje voor je doelen</span></span>
+        </button>`}</div>` : ''}
 
     ${owned ? `
     <div class="mt-6">
@@ -1527,13 +1586,6 @@ function renderDetail() {
 
     ${g.wikiTitle || g.nlTitle ? `<a href="https://${g.nlTitle ? 'nl' : 'en'}.wikipedia.org/wiki/${encodeURIComponent((g.nlTitle || g.wikiTitle).replace(/ /g, '_'))}" target="_blank" rel="noopener" class="mt-5 block text-center text-[12px] text-muted underline">Lees meer op Wikipedia</a>` : ''}
   `;
-  if (owned) {
-    const id = g.id;
-    mountNotes($('#notesMount'), id, g.notes, (html) => {
-      const rec = games.find(x => x.id === id);
-      if (rec) { rec.notes = html; rec.updatedAt = Date.now(); saveGames(); }
-    });
-  } else destroyNotes();
   hydrate($('#detailBody')).then(() => {
     const img = $('#detailBody img[src]');
     if (img && !src) $('#detailBg').style.backgroundImage = `url("${img.src}")`;
@@ -1587,10 +1639,30 @@ function updateGame(id, patch, { silent = false } = {}) {
   render();
 }
 
+// ---------- Notities: schermvullend ----------
+function openNotes(g) {
+  const id = g.id;
+  $('#notesTitle').textContent = g.title;
+  $('#notesBody').innerHTML = '<div id="notesMount" class="flex min-h-0 flex-1 flex-col"></div>';
+  showScreen($('#notesScreen'));
+  mountNotes($('#notesMount'), id, g.notes, (html) => {
+    const rec = games.find(x => x.id === id);
+    if (rec) { rec.notes = html; rec.updatedAt = Date.now(); saveGames(); }
+  }, { focus: !notesText(g.notes) }); // leeg: meteen typen; anders eerst rustig lezen
+}
+function closeNotes() {
+  if ($('#notesScreen').hidden) return;
+  document.activeElement?.blur();
+  hideScreen($('#notesScreen'), { after: () => { destroyNotes(); $('#notesBody').innerHTML = ''; if (!$('#detailScreen').hidden) renderDetail(); } });
+}
+$('#notesDone').addEventListener('click', closeNotes);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#notesScreen').hidden) closeNotes(); });
+
 $('#detailBody').addEventListener('click', async (e) => {
   const v = viewOf(currentRef);
   if (!v) return;
   const { g, owned } = v;
+  if (e.target.closest('[data-notes-open]') && owned) { openNotes(g); return; }
 
   const s = e.target.closest('[data-status]');
   if (s) {
@@ -1885,7 +1957,8 @@ async function enrichOwned() {
 document.addEventListener('click', (e) => {
   const tab = e.target.closest('[data-tab]');
   if (tab) {
-    ['#detailScreen', '#folderScreen', '#manualScreen', '#swipeScreen'].forEach(s => hideScreen($(s), { animate: false }));
+    ['#detailScreen', '#folderScreen', '#manualScreen', '#swipeScreen', '#notesScreen'].forEach(s => hideScreen($(s), { animate: false }));
+    destroyNotes();
     goTab(tab.dataset.tab, tab.dataset.sub || null);
     return;
   }
@@ -1934,6 +2007,27 @@ $('#clearSearch').addEventListener('click', () => { $('#searchInput').value = ''
 const detailOpen = () => !$('#detailScreen').hidden;
 window.addEventListener('online', () => { enrichOwned(); render(); if (detailOpen()) { renderDetail(); loadDetails(); } });
 window.addEventListener('offline', () => { render(); if (detailOpen()) renderDetail(); });
+
+// iOS-bug in web-apps op het beginscherm: het scherm van de app is soms (bv. na het toetsenbord)
+// een stuk korter dan het echte scherm, waardoor de tabbalk boven een lege strook zweeft.
+// Meten en het verschil (--vgap) gebruiken om alles wat onderaan vastzit door te trekken.
+const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+function fixViewportGap() {
+  if (!standalone) return;
+  const editing = document.activeElement?.matches?.('input, textarea, [contenteditable="true"]');
+  if (editing) return; // toetsenbord open: dan hoort het scherm korter te zijn
+  window.scrollTo(0, 0); // iOS laat de pagina soms verschoven staan na het toetsenbord
+  const portrait = innerHeight > innerWidth;
+  const full = portrait ? Math.max(screen.height, screen.width) : Math.min(screen.height, screen.width);
+  const gap = full - innerHeight;
+  document.documentElement.style.setProperty('--vgap', gap > 0 && gap < 120 ? gap + 'px' : '0px');
+}
+fixViewportGap();
+addEventListener('resize', fixViewportGap);
+addEventListener('orientationchange', () => setTimeout(fixViewportGap, 300));
+visualViewport?.addEventListener('resize', fixViewportGap);
+document.addEventListener('focusout', () => setTimeout(fixViewportGap, 150));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(fixViewportGap, 100); });
 
 // Pinch-zoom blokkeren (iOS negeert user-scalable=no soms).
 // Dubbeltik-zoom staat uit via `touch-action: manipulation` in de CSS.

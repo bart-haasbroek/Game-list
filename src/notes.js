@@ -1,5 +1,6 @@
 // Notities per game: WYSIWYG-editor met Tiptap (kop/subkop/tussenkop, lijsten, afvinklijstjes voor je voortgang).
-// Tiptap wordt pas geladen als je een eigen game opent, zodat de app snel blijft starten.
+// Bewerken gebeurt in een schermvullende overlay (#notesScreen); de info-pagina toont een voorbeeld.
+// Tiptap wordt pas geladen als je de notities opent, zodat de app snel blijft starten.
 
 let editor = null;   // actieve editor
 let gameId = null;   // van welke game
@@ -53,14 +54,14 @@ export function detachNotes() {
  * Zet de editor in `mount` (een lege div). Hergebruikt de bestaande editor als het dezelfde game is.
  * `onChange(html)` krijgt de nieuwe inhoud ('' als leeg).
  */
-export async function mountNotes(mount, id, notes, onChange) {
+export async function mountNotes(mount, id, notes, onChange, { focus = false } = {}) {
   if (editor && gameId === id && wrapper) {
     mount.replaceWith(wrapper);
     if (hadFocus) editor.commands.focus();
     return;
   }
   destroyNotes();
-  mount.innerHTML = '<div class="min-h-[140px] rounded-xl bg-surface p-3 text-muted">Notities laden…</div>';
+  mount.innerHTML = '<div class="p-5 text-muted">Notities laden…</div>';
   const [{ Editor }, { default: StarterKit }, { default: TaskList }, { default: TaskItem }, { default: Placeholder }] = await Promise.all([
     import('@tiptap/core'), import('@tiptap/starter-kit'), import('@tiptap/extension-task-list'),
     import('@tiptap/extension-task-item'), import('@tiptap/extension-placeholder'),
@@ -68,13 +69,13 @@ export async function mountNotes(mount, id, notes, onChange) {
   if (!mount.isConnected) return; // intussen een andere pagina geopend
 
   wrapper = document.createElement('div');
-  wrapper.className = 'overflow-hidden rounded-xl bg-surface';
+  wrapper.className = 'flex min-h-0 flex-1 flex-col';
   wrapper.innerHTML = `
-    <div class="no-scrollbar flex gap-0.5 overflow-x-auto border-b border-line p-1.5">
+    <div class="notes-toolbar no-scrollbar flex flex-none gap-0.5 overflow-x-auto border-b border-line p-1.5">
       ${TOOLS.map(t => `<button type="button" data-cmd="${t.cmd}" title="${t.title}" aria-label="${t.title}"
         class="grid h-9 min-w-9 flex-none place-items-center rounded-lg px-1.5 text-ink active:bg-surface-2 disabled:opacity-30 ${t.cmd === 'undo' ? 'ml-auto' : ''}">${t.html}</button>${t.sep ? '<span class="mx-1 my-1.5 w-px flex-none bg-line"></span>' : ''}`).join('')}
     </div>
-    <div data-editor></div>`;
+    <div data-editor class="notes-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain"></div>`;
   // Toolbar: mousedown voorkomen zodat de cursor in de tekst blijft staan
   wrapper.firstElementChild.addEventListener('mousedown', (e) => e.preventDefault());
   wrapper.firstElementChild.addEventListener('click', (e) => {
@@ -94,11 +95,27 @@ export async function mountNotes(mount, id, notes, onChange) {
       Placeholder.configure({ placeholder: 'Voortgang, tips, waar je gebleven bent… Gebruik het afvinklijstje voor je doelen.' }),
     ],
     content: toHTML(notes),
-    editorProps: { attributes: { class: 'notes-editor', spellcheck: 'true' } },
+    editorProps: { attributes: { class: 'notes-editor notes-big', spellcheck: 'true' } },
     onUpdate: ({ editor: ed }) => onChange(ed.isEmpty ? '' : ed.getHTML()),
     onTransaction: updateToolbar,
   });
   updateToolbar();
+  if (focus) editor.commands.focus('end');
+}
+
+// Alleen-lezen weergave (voorbeeld op de info-pagina): opgeslagen HTML opschonen
+const ALLOWED = new Set(['P', 'BR', 'H1', 'H2', 'H3', 'STRONG', 'B', 'EM', 'I', 'S', 'UL', 'OL', 'LI', 'LABEL', 'INPUT', 'SPAN', 'DIV', 'BLOCKQUOTE', 'HR']);
+const ATTRS = new Set(['data-type', 'data-checked', 'type', 'checked', 'tabindex']);
+export function notesPreviewHTML(notes) {
+  const doc = new DOMParser().parseFromString(`<div>${toHTML(notes)}</div>`, 'text/html');
+  const root = doc.body.firstElementChild;
+  for (const el of [...root.querySelectorAll('*')]) {
+    if (!ALLOWED.has(el.tagName)) { el.replaceWith(...(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT'].includes(el.tagName) ? [] : el.childNodes)); continue; }
+    for (const a of [...el.attributes]) if (!ATTRS.has(a.name)) el.removeAttribute(a.name);
+    if (el.tagName === 'INPUT') el.setAttribute('tabindex', '-1');
+    if (el.tagName === 'INPUT' && el.type !== 'checkbox') el.remove(); // voorbeeld zelf is niet klikbaar (pointer-events-none)
+  }
+  return root.innerHTML;
 }
 
 export function destroyNotes() {

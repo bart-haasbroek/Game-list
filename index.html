@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Game List">
   <link rel="icon" href="/icons/icon.svg?v=2" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=3">
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -113,6 +113,15 @@
   </section>
 
   <!-- Handmatig -->
+  <!-- Notities: schermvullend lezen en bewerken -->
+  <section id="notesScreen" class="fixed inset-0 z-30 flex animate-slide-up flex-col bg-bg" hidden>
+    <header class="pt-safe flex flex-none items-center gap-3 border-b border-line px-4 pb-2.5">
+      <div class="min-w-0 flex-1 pt-2"><div class="text-[11px] font-semibold uppercase tracking-wider text-muted">Notities &amp; voortgang</div><strong id="notesTitle" class="block truncate text-[17px]"></strong></div>
+      <button id="notesDone" class="mt-2 rounded-full bg-accent px-4 py-1.5 font-bold text-white">Klaar</button>
+    </header>
+    <div id="notesBody" class="pb-safe flex min-h-0 flex-1 flex-col"></div>
+  </section>
+
   <section id="manualScreen" class="fixed inset-0 z-20 flex animate-slide-up flex-col bg-bg" hidden>
     <header class="pt-safe flex flex-none items-center justify-between px-4 pb-2.5">
       <button class="py-2 font-semibold text-muted" data-close>Annuleer</button>
