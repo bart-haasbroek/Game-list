@@ -79,8 +79,10 @@
 .notes-editor input[type="checkbox"] { width: 19px; height: 19px; accent-color: var(--color-accent); }
 /* Schermvullend: grotere tekst, gecentreerd, de hele ruimte is klikbaar */
 .notes-big { min-height: 100%; padding: 18px 20px 40vh; font-size: 18px; line-height: 1.6; max-width: 760px; margin: 0 auto; }
-.notes-big h1 { font-size: 26px; }
-.notes-big h2 { font-size: 22px; }
+.notes-big h1 { font-size: 27px; }
+.notes-big h2 { font-size: 23px; }
+/* 20px: vanaf 20pt gebruikt iOS SF Pro Display (net als de andere koppen); kleiner = SF Pro Text, dat oogt als een ander lettertype */
+.notes-big h3 { font-size: 20px; }
 .notes-big input[type="checkbox"] { width: 21px; height: 21px; }
 .notes-toolbar { justify-content: safe center; }
 [data-block-menu] [aria-checked="false"] .check { visibility: hidden; }
