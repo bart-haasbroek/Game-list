@@ -592,9 +592,11 @@ function renderHome() {
 
   // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
   const playCard = (g) => {
-    const sel = g === hero;
-    return `<button data-hero="${g.id}" class="flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-accent/70' : 'active:bg-surface'}">
-      ${coverHTML(g, { cls: 'w-full' })}
+    // Rand + label alleen als er iets te kiezen valt: zo zie je welke game bovenaan in beeld staat
+    const sel = g === hero && playing.length > 1;
+    const tag = sel ? '<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">Uitgelicht</span>' : '';
+    return `<button data-hero="${g.id}" aria-pressed="${sel}" title="${sel ? 'Staat bovenaan · tik nog eens voor de info' : 'Tik om bovenaan te zetten'}" class="flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-inset ring-accent/70' : 'active:bg-surface'}">
+      ${coverHTML(g, { cls: 'w-full', extra: tag })}
       <div class="mt-2 truncate text-[15px] font-semibold">${esc(g.title)}</div>
       <div class="truncate text-[13px] ${sel ? 'font-semibold text-accent' : 'text-muted'}">${esc(platLabel(g))}</div>
     </button>`;
@@ -609,7 +611,8 @@ function renderHome() {
     ${heroHTML(hero)}
     ${restoreCard}
     ${playing.length ? homeHead('Aan het spelen', 'data-tab="playing"')
-      + `<div class="row-scroller play-row no-scrollbar -mx-4 flex items-start gap-2 overflow-x-auto px-3 pb-1 [&>*]:w-[148px]">${playing.map(playCard).join('')}</div>` : ''}
+      + `<div class="row-scroller play-row no-scrollbar -mx-4 flex items-start gap-2 overflow-x-auto px-3 py-1 [&>*]:w-[148px]">${playing.map(playCard).join('')}</div>
+      ${playing.length > 1 ? '<p class="mt-1 text-[12px] text-muted">Tik op een game om hem bovenaan te zetten, nog eens tikken opent de info.</p>' : ''}` : ''}
     ${mineUpcoming.length ? homeHead('Afteller') + `<div class="flex flex-col gap-2">${countdownRows}</div>` : ''}
     ${homeHead('Overzicht')}
     <div class="home-tiles grid grid-cols-2 gap-2.5">
@@ -811,11 +814,26 @@ async function searchOnline(q) {
 }
 
 // ---------- Franchise-map ----------
-function openFolder(title, items, meta, { owned = false } = {}) {
+// `split`: aangekondigde games los van de verschenen games tonen (franchise-map)
+function openFolder(title, items, meta, { owned = false, split = false } = {}) {
   $('#folderTitle').textContent = title;
-  $('#folderMeta').textContent = meta ?? `${items.length} ${items.length === 1 ? 'game' : 'games'}`;
+  const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}`;
+  const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: [e.platforms?.[0], e.year].filter(Boolean).join(' · ') });
   const body = $('#folderBody');
-  body.innerHTML = items.map(e => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: [e.platforms?.[0], e.year].filter(Boolean).join(' · ') })).join('');
+  const soon = split ? items.filter(e => isFuture(e.release)) : [];
+  if (soon.length) {
+    const out = items.filter(e => !isFuture(e.release)).sort((a, b) => String(b.release || '').localeCompare(String(a.release || '')));
+    soon.sort((a, b) => String(a.release || '9999').localeCompare(String(b.release || '9999')));
+    const head = (text, n, cls = '') => `<div class="col-span-full flex items-baseline gap-2 ${cls}"><h3 class="text-[17px] font-bold">${text}</h3><span class="text-[13px] text-muted">${n}</span></div>`;
+    // Nog niet verschenen: release-datum in plaats van platform/jaar, en een stippelrand
+    const soonCard = (e) => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || 'Nog niet verschenen' }).replace('<button ', '<button data-soon ');
+    body.innerHTML = head('Nog niet verschenen', soon.length) + soon.map(soonCard).join('')
+      + (out.length ? head('Verschenen', out.length, 'mt-3') + out.map(card).join('') : '');
+    $('#folderMeta').textContent = meta ?? `${count} · ${soon.length} binnenkort`;
+  } else {
+    body.innerHTML = items.map(card).join('');
+    $('#folderMeta').textContent = meta ?? count;
+  }
   body.scrollTop = 0;
   $('#folderSwipe').hidden = true;
   hideScreen($('#detailScreen'), { animate: false }); // anders ligt de map achter de info-pagina
@@ -823,7 +841,7 @@ function openFolder(title, items, meta, { owned = false } = {}) {
   hydrate(body);
 }
 const openFranchise = (name) => loadDataset().then(() => {
-  openFolder(name, franchiseGames(name));
+  openFolder(name, franchiseGames(name), null, { split: true });
   const btn = $('#folderSwipe');
   btn.dataset.swipe = name;
   btn.hidden = !swipeCandidates(name).length;
@@ -895,17 +913,40 @@ function renderSwipePicker() {
   loadFranchiseArt(el);
 }
 
+// Drie keuzes: kleur, icoon en tekst voor knop, overlay op de kaart en de melding erna
+const SWIPE_KINDS = {
+  no: { color: '#ff5c5c', label: 'Niet gespeeld', icon: '<path d="M18 6 6 18M6 6l12 12"/>' },
+  up: { color: '#f5b84a', label: 'Gespeeld', sub: 'niet uitgespeeld', icon: '<path d="M12 19V5M5 12l7-7 7 7"/>' },
+  yes: { color: '#4fd18b', label: 'Uitgespeeld', icon: '<path d="M20 6 9 17l-5-5"/>' },
+};
+
 function swipeCardHTML(e, top) {
   const plats = (e.platforms || []).slice(0, 3).join(', ');
-  const tilt = { yes: -14, no: 14, up: 0 };
-  const stamp = (kind, text, color, pos) => `<div data-stamp="${kind}" class="pointer-events-none absolute ${pos} z-[3] rounded-lg border-4 px-2 py-0.5 text-[26px] font-black tracking-wide opacity-0" style="border-color:${color};color:${color};rotate:${tilt[kind]}deg">${text}</div>`;
+  const overlay = (kind) => {
+    const k = SWIPE_KINDS[kind];
+    return `<div data-stamp="${kind}" class="pointer-events-none absolute inset-0 z-[3] grid place-items-center rounded-2xl opacity-0" style="background:${k.color}38;box-shadow:inset 0 0 0 4px ${k.color}">
+      <div class="flex flex-col items-center gap-2 rounded-2xl bg-black/55 px-5 py-4 backdrop-blur-sm" style="color:${k.color}">
+        <span class="grid size-16 place-items-center rounded-full text-white [&_svg]:size-9 [&_svg]:stroke-[3]" style="background:${k.color}">${svg(k.icon)}</span>
+        <b class="text-[22px] font-black uppercase tracking-wide">${k.label}</b>${k.sub ? `<span class="-mt-1.5 text-[13px] font-semibold text-white/80">${k.sub}</span>` : ''}
+      </div></div>`;
+  };
   return `<div ${top ? 'id="swipeCard"' : ''} class="relative col-start-1 row-start-1 flex min-h-0 select-none flex-col rounded-2xl bg-surface p-2.5 shadow-2xl shadow-black/50 ${top ? 'z-[2] cursor-grab touch-none' : 'z-[1] scale-[.94] translate-y-3 opacity-60'}">
-    ${top ? stamp('yes', 'UITGESPEELD', '#4fd18b', 'left-5 top-5') + stamp('no', 'NIET', '#ff5c5c', 'right-5 top-5')
-      + stamp('up', 'GESPEELD', '#f5b84a', 'left-1/2 -translate-x-1/2 bottom-24') : ''}
+    ${top ? overlay('yes') + overlay('no') + overlay('up') : ''}
     ${coverHTML(e, { cls: 'min-h-0 w-full flex-1 aspect-auto! rounded-xl! shadow-none!', w: 640 })}
     <div class="flex-none px-1 pb-0.5 pt-2.5"><div class="line-clamp-2 text-[20px] font-bold leading-tight">${esc(e.title)}</div>
       <div class="mt-0.5 truncate text-[14px] text-muted">${esc([e.year, plats].filter(Boolean).join(' · '))}</div></div>
   </div>`;
+}
+
+// Melding van de vorige keuze, zodat je ziet waar de game terechtkwam
+function swipeResultHTML() {
+  const h = swipe.history[swipe.history.length - 1];
+  if (!h) return '<div id="swipeResult" class="h-7"></div>';
+  const k = SWIPE_KINDS[h.choice];
+  const where = h.choice === 'yes' ? '→ Uitgespeeld' : h.choice === 'up' ? '→ Gestopt' : '';
+  return `<div id="swipeResult" class="swipe-result mx-auto flex h-7 max-w-full items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold" style="background:${k.color}26;color:${k.color}">
+    <span class="flex-none [&_svg]:size-4 [&_svg]:stroke-[3]">${svg(k.icon)}</span>
+    <span class="truncate text-ink">${esc(h.e.title)}</span><span class="flex-none">${where || k.label}</span></div>`;
 }
 
 function renderSwipe() {
@@ -935,17 +976,25 @@ function renderSwipe() {
     <div class="mx-auto grid min-h-0 w-full max-w-[460px] flex-1 grid-rows-[minmax(0,1fr)] pt-2" style="max-height:760px">
       ${queue[1] ? swipeCardHTML(queue[1], false) : ''}${swipeCardHTML(queue[0], true)}
     </div>
-    <div class="flex flex-none items-center justify-center gap-4 pb-3 pt-4">
-      ${undo}
-      ${btn('data-swipe-no', 'size-16 text-[#ff5c5c] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M18 6 6 18M6 6l12 12"/>'), 'Niet gespeeld')}
-      ${btn('data-swipe-up', 'size-14 text-[#f5b84a] [&_svg]:size-7 [&_svg]:stroke-[3]', svg('<path d="M12 19V5M5 12l7-7 7 7"/>'), 'Gespeeld, niet uitgespeeld')}
-      ${btn('data-swipe-yes', 'size-16 text-[#4fd18b] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M20 6 9 17l-5-5"/>'), 'Uitgespeeld')}
+    <div class="flex-none pt-3">${swipeResultHTML()}</div>
+    <div class="flex flex-none items-start justify-center gap-3 pb-3 pt-2">
+      <div class="flex w-14 flex-col items-center pt-2">${undo}</div>
+      ${['no', 'up', 'yes'].map(kind => {
+        const k = SWIPE_KINDS[kind];
+        return `<div class="flex w-[84px] flex-col items-center gap-1.5">
+          <button data-swipe-${kind} data-swipe-btn="${kind}" aria-label="${k.label}${k.sub ? ', ' + k.sub : ''}" style="--c:${k.color}"
+            class="swipe-btn grid ${kind === 'up' ? 'size-14 mt-1 [&_svg]:size-7' : 'size-16 [&_svg]:size-8'} place-items-center rounded-full shadow-lg [&_svg]:stroke-[3]">${svg(k.icon)}</button>
+          <span class="text-center text-[12px] font-semibold leading-tight" style="color:${k.color}">${k.label}${k.sub ? `<br><span class="font-normal text-muted">${k.sub}</span>` : ''}</span>
+        </div>`;
+      }).join('')}
+      <div class="w-14"></div>
     </div>`;
   bindSwipeCard($('#swipeCard'));
   hydrate(el);
 }
 
 const SWIPE_DIST = 90;
+const swipeDist = (dir) => (dir === 'up' ? 70 : SWIPE_DIST); // omhoog is op een telefoon een kortere beweging
 // Welke kant op: omhoog telt pas als je duidelijk meer omhoog dan opzij veegt
 const swipeDir = (dx, dy) => (-dy > Math.abs(dx) ? 'up' : dx > 0 ? 'yes' : 'no');
 
@@ -953,8 +1002,20 @@ function placeCard(card, dx, dy) {
   const dir = swipeDir(dx, dy);
   const up = dir === 'up';
   card.style.transform = `translate(${dx}px, ${up ? dy : dy * 0.3}px) rotate(${dx / 16}deg)`;
-  const p = Math.min(1, (up ? -dy : Math.abs(dx)) / SWIPE_DIST);
-  for (const kind of ['yes', 'no', 'up']) card.querySelector(`[data-stamp="${kind}"]`).style.opacity = dir === kind ? p : 0;
+  const p = (dx || dy) ? Math.min(1, (up ? -dy : Math.abs(dx)) / swipeDist(dir)) : 0;
+  for (const kind of ['yes', 'no', 'up']) {
+    const on = dir === kind ? p : 0;
+    card.querySelector(`[data-stamp="${kind}"]`).style.opacity = on;
+    lightButton(kind, on);
+  }
+}
+
+// Knop licht mee op terwijl je veegt (0 = rustig, 1 = keuze gemaakt bij loslaten)
+function lightButton(kind, p) {
+  const b = document.querySelector(`[data-swipe-btn="${kind}"]`);
+  if (!b) return;
+  b.style.setProperty('--p', p);
+  b.classList.toggle('is-on', p >= 1);
 }
 
 function bindSwipeCard(card) {
@@ -978,7 +1039,7 @@ function bindSwipeCard(card) {
     x0 = null;
     card.classList.replace('cursor-grabbing', 'cursor-grab');
     const dir = swipeDir(dx, dy);
-    if ((dir === 'up' ? -dy : Math.abs(dx)) > SWIPE_DIST) swipeDecide(dir);
+    if ((dir === 'up' ? -dy : Math.abs(dx)) > swipeDist(dir)) swipeDecide(dir);
     else { card.style.transition = 'transform .25s'; placeCard(card, 0, 0); }
   };
   card.addEventListener('pointerup', end);
@@ -990,7 +1051,7 @@ function swipeDecide(choice) {
   const card = $('#swipeCard');
   if (!card || swipe.busy) return;
   swipe.busy = true;
-  card.style.transition = 'transform .25s ease-in, opacity .25s';
+  card.style.transition = 'transform .3s ease-in, opacity .3s';
   if (choice === 'up') {
     placeCard(card, 0, -140); // stempel tonen
     card.style.transform = 'translate(0, -120vh)';
@@ -1001,6 +1062,7 @@ function swipeDecide(choice) {
   }
   navigator.vibrate?.(10);
   setTimeout(() => {
+    lightButton(choice, 0);
     const e = swipe.queue.shift();
     const status = SWIPE_STATUS[choice];
     if (status) {
@@ -1016,7 +1078,7 @@ function swipeDecide(choice) {
     }
     swipe.busy = false;
     renderSwipe();
-  }, 230);
+  }, 320);
 }
 
 function swipeUndo() {
@@ -1420,20 +1482,21 @@ function renderDetail() {
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
-    ${owned ? `<div class="mt-6">${label('Notities & voortgang')}<div id="notesMount"></div></div>` : ''}
-
     ${owned ? `
-    <div class="mt-6">
-      ${label('Mijn cijfer')}
-      <div class="grid grid-cols-11 gap-1">${ratingBtns}</div>
-    </div>
-
     <div class="mt-6">
       ${label(['backlog', 'wishlist', 'interested'].includes(g.status) ? 'Mijn platform' : 'Gespeeld op')}
       <div class="flex flex-wrap gap-1.5">
         ${platformChoices(g, platforms).map(p => `<button data-platform="${esc(p)}" aria-pressed="${mine_.includes(p)}" class="rounded-full px-3 py-1.5 text-[13px] font-semibold ${mine_.includes(p) ? 'bg-ink text-bg' : 'bg-surface text-muted'}">${mine_.includes(p) ? '✓ ' : ''}${esc(p)}</button>`).join('')}
         <button data-add-platform class="rounded-full border border-dashed border-line px-3 py-1.5 text-[13px] font-semibold text-muted">+ Platform</button>
       </div>
+    </div>` : ''}
+
+    ${owned ? `<div class="mt-6">${label('Notities & voortgang')}<div id="notesMount"></div></div>` : ''}
+
+    ${owned ? `
+    <div class="mt-6">
+      ${label('Mijn cijfer')}
+      <div class="grid grid-cols-11 gap-1">${ratingBtns}</div>
     </div>
 
     ${g.status === 'playing' || DONE.includes(g.status) || g.startedAt || g.finishedAt ? `

@@ -150,3 +150,20 @@
   #picker { align-items: center; justify-content: center; padding-left: var(--side); }
   #picker > div { max-width: 420px; }
 }
+
+/* Swipe-knoppen: lichten op terwijl je die kant op veegt (--p van 0 tot 1) */
+.swipe-btn {
+  --p: 0;
+  background: color-mix(in srgb, var(--c) calc(var(--p) * 100%), var(--color-surface));
+  color: color-mix(in srgb, #fff calc(var(--p) * 100%), var(--c));
+  transform: scale(calc(1 + var(--p) * .18));
+  transition: transform .12s, box-shadow .2s;
+}
+.swipe-btn:active { transform: scale(.9); }
+.swipe-btn.is-on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 35%, transparent), 0 0 28px var(--c); }
+.swipe-result { animation: swipe-result .35s cubic-bezier(.2, .8, .2, 1); }
+@keyframes swipe-result { from { opacity: 0; transform: translateY(6px) scale(.95); } }
+
+/* Franchise-map: nog niet verschenen games herken je aan een accentrand en gedimde cover */
+[data-soon] > div:first-child { outline: 2px dashed color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: 2px; }
+[data-soon] > div:first-child img { filter: saturate(.55) brightness(.85); }
