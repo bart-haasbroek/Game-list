@@ -7,6 +7,7 @@ Gebouwd met Vite, Tailwind CSS v4 en vite-plugin-pwa. Packagemanager: yarn.
 - **Home**: overzicht, afteller voor aangekondigde games, nu aan het spelen, binnenkort op Nintendo, hoogste cijfers.
 - **Bibliotheek**: tegels per lijst (Speel ik, Nog spelen, Wishlist, Uitgespeeld, Interessant, Gestopt), Alle games,
   en bladeren op platform, serie en genre.
+  **Wat heb ik gespeeld?**: veeg per franchise door games (rechts = gespeeld → Uitgespeeld, links = niet), met ongedaan maken.
 - **Ontdek** (verrekijker): zoeken in ~17.000 Nintendo-games (offline), franchise-mappen, binnenkort.
 - **Meer**: binnenkort, handmatig toevoegen, statistieken, back-up.
 

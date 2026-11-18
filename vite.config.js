@@ -39,7 +39,7 @@ export default defineConfig({
           },
           {
             // Grote IGDB-covers van je eigen games: offline beschikbaar
-            urlPattern: ({ url }) => url.hostname === 'images.igdb.com' && url.pathname.includes('t_cover_big'),
+            urlPattern: ({ url }) => url.hostname === 'images.igdb.com' && /t_cover_big|t_1080p/.test(url.pathname),
             handler: 'CacheFirst',
             options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] } },
           },

@@ -43,6 +43,9 @@
 @utility pb-tabs { padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(62px + env(safe-area-inset-bottom, 0px)); }
 @utility bottom-fab { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
 @utility pb-grid { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+/* Grote kop op Home */
+.home-hero { --hero-h: min(62vh, 500px); }
+
 @utility no-scrollbar {
   scrollbar-width: none;
   &::-webkit-scrollbar { display: none; }
@@ -93,6 +96,9 @@
   .pb-grid { padding-bottom: 48px; }
   .row-scroller { margin-left: calc(-1 * var(--gutter)); margin-right: calc(-1 * var(--gutter)); padding-left: var(--gutter); padding-right: var(--gutter); }
   .row-scroller > * { width: 136px !important; }
+  .row-scroller.play-row > * { width: 170px !important; }
+  .home-hero { --hero-h: 440px; margin-left: calc(-1 * var(--gutter)); margin-right: calc(-1 * var(--gutter)); }
+  .home-hero .pt-safe, .home-hero > button:first-of-type { padding-left: var(--gutter); }
   /* Met een muis kun je niet vegen: toon op desktop een dunne scrollbalk onder horizontale rijen */
   .row-scroller { scrollbar-width: thin; scrollbar-color: var(--color-line) transparent; padding-bottom: 10px; }
   .row-scroller::-webkit-scrollbar { display: block; height: 8px; }
@@ -107,7 +113,7 @@
   #toast { bottom: 32px; margin-bottom: 0; left: calc(50% + var(--side) / 2); }
 
   /* Info-pagina, map en formulier openen rechts van de zijbalk */
-  #detailScreen, #folderScreen, #manualScreen { left: var(--side); overflow: hidden; }
+  #detailScreen, #folderScreen, #manualScreen, #swipeScreen { left: var(--side); overflow: hidden; }
   #detailBody, #detailScreen > header { padding-left: max(var(--gutter), calc((100% - 780px) / 2)); padding-right: max(var(--gutter), calc((100% - 780px) / 2)); }
   #folderScreen > header, #folderBody { padding-left: var(--gutter); padding-right: var(--gutter); }
   #folderScreen > header { padding-top: 28px; }

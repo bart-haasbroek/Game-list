@@ -102,6 +102,7 @@ export async function fetchDetails(g) {
         if (d.wikiTitle) info.wikiTitle = d.wikiTitle;
         if (d.nlTitle) info.nlTitle = d.nlTitle;
         if (d.critic) info.critic = d.critic;
+        info.artwork = d.artwork || null;
         if (d.playtime) info.playtime = d.playtime;
         igdbSummary = d.summary || '';
       }

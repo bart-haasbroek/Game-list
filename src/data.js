@@ -245,6 +245,9 @@ export function franchiseList() {
 
 export const franchiseGames = (name) => byFranchise.get(name) || [];
 
+/** Populairste games (IGDB: aantal beoordelingen + hype) */
+export const popularGames = (limit = 300) => (entries ? entries.slice().sort((a, b) => b.pop - a.pop).slice(0, limit) : []);
+
 export function franchiseCover(name) {
   // Nieuwste game met een cover als voorkant van de map
   const list = franchiseGames(name);

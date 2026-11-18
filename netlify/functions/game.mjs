@@ -17,7 +17,8 @@ export default async (req) => {
   try {
     const [[g], [ttb]] = await Promise.all([
       igdb('games', `fields summary, genres.name, involved_companies.developer, involved_companies.publisher,
-  involved_companies.company.name, videos.video_id, videos.name, websites.url, aggregated_rating, aggregated_rating_count;
+  involved_companies.company.name, videos.video_id, videos.name, websites.url, aggregated_rating, aggregated_rating_count,
+  artworks.image_id, screenshots.image_id;
 where id = ${id};`),
       igdb('game_time_to_beats', `fields hastily, normally, completely; where game_id = ${id};`).catch(() => []),
     ]);
@@ -33,6 +34,8 @@ where id = ${id};`),
       youtube: trailer?.video_id || null,
       wikiTitle: wikiTitle(urls, 'en'),
       nlTitle: wikiTitle(urls, 'nl'),
+      // Liggende afbeelding voor de grote kop op Home (artwork, anders een screenshot)
+      artwork: (() => { const a = g.artworks?.[0] || g.screenshots?.[0]; return a ? `https://images.igdb.com/igdb/image/upload/t_1080p/${a.image_id}.jpg` : null; })(),
       critic: g.aggregated_rating ? { score: Math.round(g.aggregated_rating), count: g.aggregated_rating_count || 0 } : null,
       playtime: ttb && (ttb.hastily || ttb.normally || ttb.completely)
         ? { hastily: hours(ttb.hastily), normally: hours(ttb.normally), completely: hours(ttb.completely) } : null,

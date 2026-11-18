@@ -2,7 +2,7 @@ import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { searchIGDB, searchWikipedia, SourceUnavailable } from './sources.js';
 import {
-  loadDataset, datasetInfo, getEntry, searchDataset, franchiseList, franchiseGames, franchiseCover,
+  loadDataset, datasetInfo, getEntry, searchDataset, franchiseList, franchiseGames, franchiseCover, popularGames,
   upcoming, isFuture, formatRelease, countdown, normalize, findEntry, checkForUpdate, onDatasetUpdate,
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
@@ -301,6 +301,7 @@ function render() {
   else if (tab === 'home') renderHome();
   else if (tab === 'discover') renderDiscover();
   else renderMore();
+  $('#appHeader').hidden = tab === 'home' && !listId; // Home heeft een eigen kop met afbeelding
   renderTabs();
 }
 
@@ -343,6 +344,9 @@ function renderLibrary() {
     <div class="lib-tiles grid grid-cols-3 gap-2.5 pt-1">${LIBRARY_ORDER.map(tile).join('')}</div>
     <button data-sub="all" class="mt-2.5 flex w-full items-center gap-3 rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3.5 text-left active:scale-[.98] [&>svg:first-child]:size-5 [&>svg:first-child]:text-accent">
       ${ICONS.all}<span class="flex-1 text-[17px] font-semibold">Alle games</span><b class="text-[22px] text-accent">${games.length}</b>${ICONS.chevron}</button>
+    <button data-swipe class="mt-2.5 flex w-full items-center gap-3 rounded-2xl bg-surface px-4 py-3 text-left active:scale-[.98] [&>svg:first-child]:size-5 [&>svg:first-child]:text-[#4fd18b]">
+      ${svg('<rect x="3" y="5" width="12" height="16" rx="2" transform="rotate(-8 9 13)"/><rect x="9" y="3" width="12" height="16" rx="2"/>')}
+      <span class="flex-1"><span class="block text-[17px] font-semibold">Wat heb ik gespeeld?</span><span class="text-[12px] text-muted">Veeg per franchise door je games</span></span>${ICONS.chevron}</button>
     <h2 class="mb-2.5 mt-7 text-[22px] font-bold tracking-tight">Bladeren</h2>
     <div class="flex flex-col gap-2">
       ${row('data-sub="platforms"', ICONS.platforms, 'Platforms', groupsOf('platforms').length)}
@@ -418,10 +422,78 @@ function renderList(listId) {
 }
 
 // ---------- Home ----------
+// Grote kop op Home: de game die je nu speelt. Kies een andere via "Aan het spelen".
+function heroGame(playing) {
+  return playing.find(g => g.id === prefs.heroId) || playing[0] || null;
+}
+
+// Liggende afbeelding (artwork) van IGDB, één keer per game opgehaald en bij de game bewaard
+const artworkTried = new Set();
+async function ensureArtwork(g) {
+  if (!g || g.artwork !== undefined || !g.igdbId || !online() || artworkTried.has(g.id)) return;
+  artworkTried.add(g.id);
+  try {
+    const res = await fetch('/api/game?id=' + encodeURIComponent(g.igdbId));
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) return; // bv. yarn dev zonder functions
+    const d = await res.json();
+    const patch = { artwork: d.artwork || null };
+    if (g.info && !g.info.playtime && d.playtime) patch.info = { ...g.info, playtime: d.playtime, critic: d.critic || g.info.critic };
+    updateGame(g.id, patch);
+    if (prefs.tab === 'home' && $('#detailScreen').hidden) renderHome();
+  } catch {}
+}
+
+function heroHTML(g) {
+  const d = new Intl.DateTimeFormat('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date());
+  const date = d.charAt(0).toUpperCase() + d.slice(1); // "Woensdag 18 november"
+  const title = `<div class="pt-safe relative z-[2] px-4"><h1 class="text-[32px] font-extrabold tracking-tight [text-shadow:0_2px_12px_rgba(0,0,0,.5)]">Game List</h1>
+    <div class="-mt-0.5 text-[13px] font-medium text-white/80 [text-shadow:0_1px_6px_rgba(0,0,0,.6)]">${esc(date)}</div></div>`;
+  if (!g) {
+    return `<div id="hero" class="home-hero relative -mx-4 overflow-hidden" style="--hero-h:300px;height:var(--hero-h)">
+      <div id="heroImg" class="absolute inset-0 bg-linear-to-br from-accent/45 via-[#3b2a6b]/40 to-bg"></div>
+      ${title}
+      <div class="absolute inset-x-0 bottom-0 z-[2] px-4 pb-6">
+        <div class="text-[24px] font-extrabold leading-tight">Wat speel je nu?</div>
+        <p class="mt-1 text-[14px] text-white/75">Zet een game op <b>Speel ik</b>, dan staat hij hier groot.</p>
+        <button data-tab="discover" class="mt-3 rounded-full bg-white px-4 py-2 text-[14px] font-bold text-bg">Game zoeken</button>
+      </div>
+    </div>`;
+  }
+  const extra = extrasFor(g.igdbId);
+  const pt = g.info?.playtime || extra?.playtime;
+  const hours = pt && (pt.normally || pt.hastily || pt.completely);
+  const genre = (g.info?.genres?.length ? g.info.genres : g.genres || [])[0];
+  const line = [genre, g.myPlatform || g.platforms?.[0]].filter(Boolean).join(' · ');
+  const art = g.artwork ? imgUrl(g.artwork, 1280) : null;
+  const cover = coverSrc(g);
+  const bg = art || (cover ? imgUrl(cover) : null);
+  return `<div id="hero" class="home-hero relative -mx-4 overflow-hidden bg-surface" style="height:var(--hero-h)">
+    <div id="heroImg" class="absolute inset-0 origin-top bg-cover bg-center will-change-transform ${art ? '' : 'scale-125 blur-2xl brightness-[.55] saturate-150'}"
+      style="${bg ? `background-image:url('${esc(bg).replace(/'/g, '%27')}')` : ''}"></div>
+    <div class="absolute inset-0 bg-linear-to-b from-black/50 via-black/0 via-35% to-bg"></div>
+    ${title}
+    ${art ? '' : cover ? `<div class="absolute left-1/2 top-[44%] z-[1] w-[34%] max-w-[170px] -translate-x-1/2 -translate-y-1/2">${coverHTML(g, { cls: 'shadow-2xl! shadow-black/60!', placeholder: false })}</div>` : ''}
+    <button data-open="${g.id}" class="absolute inset-x-0 bottom-0 z-[2] px-4 pb-5 pr-20 text-left">
+      <div class="line-clamp-2 text-[30px] font-black leading-[1.05] tracking-tight [text-shadow:0_2px_16px_rgba(0,0,0,.6)]">${esc(g.title)}</div>
+      ${line ? `<div class="mt-2 text-[15px] font-medium text-white/85">${esc(line)}</div>` : ''}
+      ${hours ? `<div class="text-[14px] text-white/65">~${fmtHours(hours)} om uit te spelen</div>` : ''}
+    </button>
+    <button data-open="${g.id}" aria-label="Info" class="absolute bottom-6 right-4 z-[3] grid size-12 place-items-center rounded-full border border-white/35 bg-black/25 backdrop-blur-md">
+      ${svg('<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>')}
+    </button>
+  </div>`;
+}
+
+// Grote kop van een sectie op Home, met pijltje als hij ergens heen gaat
+const homeHead = (t, attrs = '') => attrs
+  ? `<button ${attrs} class="mb-3 mt-8 flex items-center gap-1 text-[23px] font-bold tracking-tight active:opacity-70">${t}${svg('<path d="m9 18 6-6-6-6"/>', 'size-6! stroke-[2.5]! text-accent')}</button>`
+  : `<h2 class="mb-3 mt-8 text-[23px] font-bold tracking-tight">${t}</h2>`;
+
 function renderHome() {
-  setHeader('Home', new Intl.DateTimeFormat('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date()));
+  setHeader('Home');
   showView('homeView');
   const el = $('#homeView');
+  const keepScroll = el.scrollTop;
   const year = new Date().getFullYear();
   const count = (s) => games.filter(g => g.status === s).length;
   const finishedYear = games.filter(g => g.finishedAt?.startsWith(String(year))).length;
@@ -446,30 +518,76 @@ function renderHome() {
     </button>`;
   }).join('');
 
-  const playing = sortGames(games.filter(g => g.status === 'playing'));
+  const playing = games.filter(g => g.status === 'playing')
+    .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
+  const hero = heroGame(playing);
   const top = games.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating).slice(0, 10);
   const lastFinished = games.filter(g => g.status === 'finished').sort((a, b) => String(b.finishedAt || '').localeCompare(String(a.finishedAt || ''))).slice(0, 10);
   const nintendoUpcoming = upcoming(30).filter(e => !ownedBy(e.key)).slice(0, 15);
 
+  // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
+  const playCard = (g) => {
+    const sel = g === hero;
+    return `<button data-hero="${g.id}" class="flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-accent/70' : 'active:bg-surface'}">
+      ${coverHTML(g, { cls: 'w-full' })}
+      <div class="mt-2 truncate text-[15px] font-semibold">${esc(g.title)}</div>
+      <div class="truncate text-[13px] ${sel ? 'font-semibold text-accent' : 'text-muted'}">${esc(g.myPlatform || g.platforms?.[0] || '')}</div>
+    </button>`;
+  };
+
   el.innerHTML = `
-    <div class="home-tiles grid grid-cols-2 gap-2.5 pt-1">
+    ${heroHTML(hero)}
+    ${playing.length ? homeHead('Aan het spelen', 'data-tab="playing"')
+      + `<div class="row-scroller play-row no-scrollbar -mx-4 flex items-start gap-2 overflow-x-auto px-3 pb-1 [&>*]:w-[148px]">${playing.map(playCard).join('')}</div>` : ''}
+    ${mineUpcoming.length ? homeHead('Afteller') + `<div class="flex flex-col gap-2">${countdownRows}</div>` : ''}
+    ${homeHead('Overzicht')}
+    <div class="home-tiles grid grid-cols-2 gap-2.5">
       ${tile(count('playing'), 'speel ik nu', 'playing', true)}
       ${tile(count('backlog'), 'nog te spelen', 'backlog')}
       ${tile(count('wishlist'), 'op mijn wishlist', 'wishlist')}
       ${tile(finishedYear, `uitgespeeld in ${year}`, 'finished')}
     </div>
-    ${sectionHead('Afteller')}
-    ${countdownRows ? `<div class="flex flex-col gap-2">${countdownRows}</div>`
-      : `<div class="rounded-2xl bg-surface p-4 text-[13px] text-muted">Zet een aangekondigde game op je wishlist, dan tel je hier af tot de release.</div>`}
-    ${playing.length ? sectionHead('Nu aan het spelen', `<button data-tab="playing" class="text-[13px] font-semibold text-accent">Alles</button>`) + rowScroller(playing.map(g => cardHTML(g)).join('')) : ''}
-    ${nintendoUpcoming.length ? sectionHead('Binnenkort op Nintendo', `<button data-upcoming class="text-[13px] font-semibold text-accent">Alles</button>`)
+    ${nintendoUpcoming.length ? homeHead('Binnenkort op Nintendo', 'data-upcoming')
       + rowScroller(nintendoUpcoming.map(e => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || '' })).join('')) : ''}
-    ${top.length ? sectionHead('Mijn hoogste cijfers') + rowScroller(top.map(g => cardHTML(g)).join('')) : ''}
-    ${lastFinished.length ? sectionHead('Laatst uitgespeeld') + rowScroller(lastFinished.map(g => cardHTML(g, { sub: g.finishedAt ? formatRelease(g.finishedAt) : '' })).join('')) : ''}
+    ${top.length ? homeHead('Mijn hoogste cijfers') + rowScroller(top.map(g => cardHTML(g)).join('')) : ''}
+    ${lastFinished.length ? homeHead('Laatst uitgespeeld', 'data-tab="finished"') + rowScroller(lastFinished.map(g => cardHTML(g, { sub: g.finishedAt ? formatRelease(g.finishedAt) : '' })).join('')) : ''}
     <div class="mt-6 text-center text-[12px] text-muted">${games.length} games in je verzameling${average(games) ? ` · gemiddeld cijfer ${average(games)}` : ''}</div>
   `;
+  el.scrollTop = keepScroll;
+  onHomeScroll();
   hydrate(el);
+  ensureArtwork(hero);
 }
+
+// ---------- Home: trek-om-te-vergroten en parallax op de kop ----------
+const homeEl = $('#homeView');
+function onHomeScroll() {
+  const img = $('#heroImg');
+  if (img && !pullStart) img.style.transform = homeEl.scrollTop > 0 ? `translateY(${homeEl.scrollTop * 0.4}px)` : '';
+}
+let pullStart = null, pulled = 0;
+function setPull(px, animate) {
+  const hero = $('#hero');
+  if (!hero) return;
+  hero.style.transition = animate ? 'height .4s cubic-bezier(.2,.8,.2,1)' : 'none';
+  hero.style.height = px ? `calc(var(--hero-h) + ${px}px)` : 'var(--hero-h)';
+}
+homeEl.addEventListener('scroll', onHomeScroll, { passive: true });
+homeEl.addEventListener('touchstart', (e) => {
+  pullStart = homeEl.scrollTop <= 0 && $('#hero') && e.touches.length === 1 ? e.touches[0].clientY : null;
+  pulled = 0;
+}, { passive: true });
+homeEl.addEventListener('touchmove', (e) => {
+  if (pullStart == null) return;
+  const dy = e.touches[0].clientY - pullStart;
+  if (dy <= 0 || homeEl.scrollTop > 0) { if (pulled) { pulled = 0; setPull(0); } return; }
+  e.preventDefault(); // geen stuiter van de browser: wij rekken de kop zelf op
+  pulled = Math.min(260, dy * 0.55);
+  setPull(pulled);
+}, { passive: false });
+const endPull = () => { if (pulled) setPull(0, true); pullStart = null; pulled = 0; };
+homeEl.addEventListener('touchend', endPull);
+homeEl.addEventListener('touchcancel', endPull);
 
 // ---------- Ontdek ----------
 let searchTimer, searchCtrl, onlineResults = null, onlineSource = null;
@@ -593,11 +711,17 @@ function openFolder(title, items, meta, { owned = false } = {}) {
   const body = $('#folderBody');
   body.innerHTML = items.map(e => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: [e.platforms?.[0], e.year].filter(Boolean).join(' · ') })).join('');
   body.scrollTop = 0;
+  $('#folderSwipe').hidden = true;
   hideScreen($('#detailScreen'), { animate: false }); // anders ligt de map achter de info-pagina
   showScreen($('#folderScreen'));
   hydrate(body);
 }
-const openFranchise = (name) => loadDataset().then(() => openFolder(name, franchiseGames(name)));
+const openFranchise = (name) => loadDataset().then(() => {
+  openFolder(name, franchiseGames(name));
+  const btn = $('#folderSwipe');
+  btn.dataset.swipe = name;
+  btn.hidden = !swipeCandidates(name).length;
+});
 const openUpcoming = () => loadDataset().then(() => {
   const known = upcoming(1000);
   const list = [...known, ...upcoming(1000, { notable: false }).filter(e => !known.includes(e))];
@@ -606,6 +730,182 @@ const openUpcoming = () => loadDataset().then(() => {
     const cd = countdown(list[i].release);
     if (cd) b.lastElementChild.textContent = cd.small;
   });
+});
+
+// ---------- Swipen: wat heb ik gespeeld? ----------
+// Per franchise een stapel kaarten: naar rechts = gespeeld (komt in Uitgespeeld, zonder datum),
+// naar links = niet gespeeld (wordt niet meer gevraagd). Details vul je later zelf aan.
+const SWIPE_TOP = '__top';
+const swipe = { set: null, queue: [], history: [], yes: 0, no: 0, busy: false };
+const swipedNo = new Set(store.load('gl.swipedNo', []));
+const saveSwipedNo = () => store.save('gl.swipedNo', [...swipedNo]);
+const swipeName = (set) => (set === SWIPE_TOP ? 'Populair' : set);
+
+function swipeCandidates(set) {
+  const list = set === SWIPE_TOP ? popularGames(400) : franchiseGames(set);
+  return list.filter(e => !isFuture(e.release) && !ownedBy(e.key) && !swipedNo.has(e.key))
+    .sort((a, b) => b.pop - a.pop || String(a.release).localeCompare(String(b.release)));
+}
+
+function openSwipe(set = null) {
+  loadDataset().then(() => {
+    hideScreen($('#folderScreen'), { animate: false });
+    hideScreen($('#detailScreen'), { animate: false });
+    showScreen($('#swipeScreen'));
+    if (set) startSwipe(set); else renderSwipePicker();
+  });
+}
+
+function startSwipe(set) {
+  Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, no: 0, busy: false });
+  renderSwipe();
+}
+
+function renderSwipePicker() {
+  swipe.set = null;
+  $('#swipeTitle').textContent = 'Wat heb ik gespeeld?';
+  $('#swipeMeta').textContent = 'Kies een franchise';
+  const sets = [SWIPE_TOP, ...franchiseList().map(f => f.name)]
+    .map(name => ({ name, left: swipeCandidates(name).length }))
+    .filter((f, i) => f.left > 0 && (i < 60));
+  const tile = ({ name, left }) => {
+    const cover = name === SWIPE_TOP ? popularGames(1)[0] : franchiseCover(name);
+    return `<button data-swipe-pick="${esc(name)}" class="flex items-center gap-3 rounded-2xl bg-surface p-2.5 text-left active:scale-[.97]">
+      ${cover ? coverHTML(cover, { cls: 'w-11 flex-none rounded-md! shadow-none!', placeholder: false }) : '<span class="w-11"></span>'}
+      <span class="min-w-0"><b class="block truncate">${esc(swipeName(name))}</b><span class="text-[12px] text-muted">nog ${left}</span></span></button>`;
+  };
+  const el = $('#swipeBody');
+  el.innerHTML = `
+    <p class="mb-3 text-[13px] text-muted">Veeg naar <b class="text-[#4fd18b]">rechts</b> als je een game gespeeld hebt, naar <b class="text-[#ff5c5c]">links</b> als niet.
+      Gespeelde games komen in <b class="text-ink">Uitgespeeld</b>; cijfer en details vul je later aan.</p>
+    <div class="grid grid-cols-2 gap-2 pb-6 lg:grid-cols-4">${sets.map(tile).join('')}</div>`;
+  el.scrollTop = 0;
+  hydrate(el);
+}
+
+function swipeCardHTML(e, top) {
+  const plats = (e.platforms || []).slice(0, 3).join(', ');
+  const stamp = (kind, text, color, side) => `<div data-stamp="${kind}" class="pointer-events-none absolute ${side} top-5 z-[3] rounded-lg border-4 px-2 py-0.5 text-[26px] font-black tracking-wide opacity-0" style="border-color:${color};color:${color};transform:rotate(${kind === 'yes' ? -14 : 14}deg)">${text}</div>`;
+  return `<div ${top ? 'id="swipeCard"' : ''} class="relative col-start-1 row-start-1 select-none rounded-2xl bg-surface p-2.5 shadow-2xl shadow-black/50 ${top ? 'z-[2] cursor-grab touch-none' : 'z-[1] scale-[.94] translate-y-3 opacity-60'}">
+    ${top ? stamp('yes', 'GESPEELD', '#4fd18b', 'left-5') + stamp('no', 'NIET', '#ff5c5c', 'right-5') : ''}
+    ${coverHTML(e, { cls: 'w-full rounded-xl! shadow-none!' })}
+    <div class="px-1 pb-0.5 pt-2.5"><div class="line-clamp-2 text-[17px] font-bold leading-tight">${esc(e.title)}</div>
+      <div class="mt-0.5 truncate text-[13px] text-muted">${esc([e.year, plats].filter(Boolean).join(' · '))}</div></div>
+  </div>`;
+}
+
+function renderSwipe() {
+  const { set, queue, history } = swipe;
+  const total = history.length + queue.length;
+  $('#swipeTitle').textContent = swipeName(set);
+  $('#swipeMeta').textContent = queue.length ? `${history.length + 1} van ${total} · ${swipe.yes} gespeeld` : `${swipe.yes} gespeeld · ${swipe.no} niet`;
+  const el = $('#swipeBody');
+  const btn = (attrs, cls, icon, label) => `<button ${attrs} aria-label="${label}" class="grid place-items-center rounded-full bg-surface shadow-lg active:scale-90 ${cls}">${icon}</button>`;
+  const undo = btn(`data-swipe-undo ${history.length ? '' : 'disabled'}`, 'size-12 text-muted disabled:opacity-30', svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>'), 'Ongedaan maken');
+  if (!queue.length) {
+    el.innerHTML = `<div class="m-auto flex flex-col items-center px-6 py-10 text-center">
+      <div class="mb-3 grid size-16 place-items-center rounded-full bg-[#4fd18b]/15 text-[#4fd18b] [&_svg]:size-8">${ICONS.finished}</div>
+      <b class="text-[20px]">${total ? `Klaar met ${esc(swipeName(set))}!` : `Niks meer te doen bij ${esc(swipeName(set))}`}</b>
+      <p class="mt-1 text-[13px] text-muted">${total ? `${swipe.yes} gespeeld, ${swipe.no} niet gespeeld.` : 'Alle games staan al in je bibliotheek of zijn al langsgekomen.'}</p>
+      <div class="mt-5 flex flex-col gap-2">
+        <button data-swipe-pickers class="rounded-full bg-accent px-5 py-2.5 font-bold text-white">Andere franchise</button>
+        ${swipe.yes ? `<button data-tab="finished" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk Uitgespeeld</button>` : ''}
+      </div>
+      ${history.length ? `<div class="mt-6">${undo}</div>` : ''}
+    </div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="mx-auto grid w-full flex-none pt-2" style="max-width:min(320px, calc((100dvh - 330px) * .68))">
+      ${queue[1] ? swipeCardHTML(queue[1], false) : ''}${swipeCardHTML(queue[0], true)}
+    </div>
+    <div class="flex flex-none items-center justify-center gap-6 py-5">
+      ${btn('data-swipe-no', 'size-16 text-[#ff5c5c] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M18 6 6 18M6 6l12 12"/>'), 'Niet gespeeld')}
+      ${undo}
+      ${btn('data-swipe-yes', 'size-16 text-[#4fd18b] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M20 6 9 17l-5-5"/>'), 'Gespeeld')}
+    </div>`;
+  bindSwipeCard($('#swipeCard'));
+  hydrate(el);
+}
+
+function placeCard(card, dx, dy) {
+  card.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx / 16}deg)`;
+  const p = Math.min(1, Math.abs(dx) / 90);
+  card.querySelector('[data-stamp="yes"]').style.opacity = dx > 0 ? p : 0;
+  card.querySelector('[data-stamp="no"]').style.opacity = dx < 0 ? p : 0;
+}
+
+function bindSwipeCard(card) {
+  if (!card) return;
+  let x0 = null, y0 = 0, dx = 0, dy = 0;
+  card.addEventListener('dragstart', (e) => e.preventDefault()); // anders sleept de browser de cover-afbeelding mee
+  card.addEventListener('pointerdown', (e) => {
+    if (swipe.busy) return;
+    x0 = e.clientX; y0 = e.clientY; dx = dy = 0;
+    card.setPointerCapture(e.pointerId);
+    card.style.transition = 'none';
+    card.classList.replace('cursor-grab', 'cursor-grabbing');
+  });
+  card.addEventListener('pointermove', (e) => {
+    if (x0 == null) return;
+    dx = e.clientX - x0; dy = e.clientY - y0;
+    placeCard(card, dx, dy);
+  });
+  const end = () => {
+    if (x0 == null) return;
+    x0 = null;
+    card.classList.replace('cursor-grabbing', 'cursor-grab');
+    if (Math.abs(dx) > 90) swipeDecide(dx > 0);
+    else { card.style.transition = 'transform .25s'; placeCard(card, 0, 0); }
+  };
+  card.addEventListener('pointerup', end);
+  card.addEventListener('pointercancel', end);
+}
+
+function swipeDecide(played) {
+  const card = $('#swipeCard');
+  if (!card || swipe.busy) return;
+  swipe.busy = true;
+  card.style.transition = 'transform .25s ease-in, opacity .25s';
+  placeCard(card, played ? 140 : -140, 0); // stempel tonen
+  card.style.transform = `translate(${played ? '' : '-'}130vw, 40px) rotate(${played ? 30 : -30}deg)`;
+  navigator.vibrate?.(10);
+  setTimeout(() => {
+    const e = swipe.queue.shift();
+    if (played) {
+      const rec = addFromView(e, 'finished');
+      rec.finishedAt = null; // datum onbekend: telt niet mee als "uitgespeeld in <jaar>"
+      saveGames();
+      swipe.history.push({ e, played, id: rec.id });
+      swipe.yes++;
+    } else {
+      swipedNo.add(e.key); saveSwipedNo();
+      swipe.history.push({ e, played });
+      swipe.no++;
+    }
+    swipe.busy = false;
+    renderSwipe();
+  }, 230);
+}
+
+function swipeUndo() {
+  const h = swipe.history.pop();
+  if (!h || swipe.busy) return;
+  if (h.played) { games = games.filter(g => g.id !== h.id); saveGames(); swipe.yes--; }
+  else { swipedNo.delete(h.e.key); saveSwipedNo(); swipe.no--; }
+  swipe.queue.unshift(h.e);
+  renderSwipe();
+}
+
+document.addEventListener('keydown', (e) => {
+  if ($('#swipeScreen').hidden || !swipe.set || e.target.closest('input, textarea, select')) return;
+  if (e.key === 'ArrowRight') swipeDecide(true);
+  else if (e.key === 'ArrowLeft') swipeDecide(false);
+  else if (e.key === 'Backspace' || e.key.toLowerCase() === 'z') swipeUndo();
+});
+$('#swipeBack').addEventListener('click', () => {
+  if (swipe.set) renderSwipePicker();
+  else hideScreen($('#swipeScreen'), { after: render });
 });
 
 // ---------- Meer ----------
@@ -1172,17 +1472,31 @@ async function enrichOwned() {
 document.addEventListener('click', (e) => {
   const tab = e.target.closest('[data-tab]');
   if (tab) {
-    ['#detailScreen', '#folderScreen', '#manualScreen'].forEach(s => hideScreen($(s), { animate: false }));
+    ['#detailScreen', '#folderScreen', '#manualScreen', '#swipeScreen'].forEach(s => hideScreen($(s), { animate: false }));
     goTab(tab.dataset.tab, tab.dataset.sub || null);
     return;
   }
   const close = e.target.closest('[data-close]');
   if (close) { hideScreen(close.closest('section'), { after: render }); return; }
+  const heroBtn = e.target.closest('[data-hero]');
+  if (heroBtn) {
+    if (prefs.heroId === heroBtn.dataset.hero || heroGame(games.filter(g => g.status === 'playing'))?.id === heroBtn.dataset.hero) openDetail(heroBtn.dataset.hero);
+    else { prefs.heroId = heroBtn.dataset.hero; savePrefs(); renderHome(); homeEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+    return;
+  }
   const open = e.target.closest('[data-open]');
   if (open) { openDetail(open.dataset.open); return; }
   const fr = e.target.closest('[data-franchise]');
   if (fr && !fr.closest('#detailBody')) { openFranchise(fr.dataset.franchise); return; }
   if (e.target.closest('[data-upcoming]')) { openUpcoming(); return; }
+  const sw = e.target.closest('[data-swipe]');
+  if (sw) { openSwipe(sw.dataset.swipe || null); return; }
+  const pickSet = e.target.closest('[data-swipe-pick]');
+  if (pickSet) { startSwipe(pickSet.dataset.swipePick); return; }
+  if (e.target.closest('[data-swipe-pickers]')) { renderSwipePicker(); return; }
+  if (e.target.closest('[data-swipe-yes]')) { swipeDecide(true); return; }
+  if (e.target.closest('[data-swipe-no]')) { swipeDecide(false); return; }
+  if (e.target.closest('[data-swipe-undo]')) { swipeUndo(); return; }
   if (e.target.closest('[data-manual]')) { openManual(); return; }
   if (e.target.closest('[data-online-search]')) { searchOnline($('#searchInput').value.trim()); return; }
   const subEl = e.target.closest('[data-sub]');
