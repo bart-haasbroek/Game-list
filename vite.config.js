@@ -26,7 +26,8 @@ export default defineConfig({
       },
       workbox: {
         // De gamedatabase zit niet in de precache: die komt uit /api/games en wordt door de app zelf bewaard (src/data.js)
-        globPatterns: ['**/*.{js,css,html,png,svg}'],
+        // extras.json (critici-score en speeltijd, ~170 KB) wel: dan staat die ook offline in het gameprofiel
+        globPatterns: ['**/*.{js,css,html,png,svg}', 'data/extras.json'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/api\//, /^\/\.netlify\//],
         runtimeCaching: [

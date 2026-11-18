@@ -6,6 +6,7 @@ import {
   upcoming, isFuture, formatRelease, countdown, normalize, findEntry, checkForUpdate, onDatasetUpdate,
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
+import { loadExtras, extrasFor } from './extras.js';
 
 const APP_VERSION = '3.0.0';
 const COVER_CACHE = 'covers-v2';
@@ -721,6 +722,25 @@ async function loadDetails() {
   if (currentRef === ref && !$('#detailScreen').hidden) renderDetail();
 }
 
+// Critici-score (0–100, kleur zoals Metacritic) en speeltijd volgens spelers
+const fmtHours = (h) => (h >= 10 ? Math.round(h) : String(Math.round(h * 2) / 2).replace('.', ',')) + ' u';
+function scoresHTML(critic, playtime) {
+  const tiles = [];
+  if (critic) {
+    const c = critic.score >= 75 ? '#4fd18b' : critic.score >= 50 ? '#f5b84a' : '#ff5c5c';
+    tiles.push(`<div class="flex-1 rounded-xl p-2.5 text-center" style="background:color-mix(in srgb,${c} 16%,var(--color-surface,#191c23))">
+      <b class="block text-[22px] leading-tight" style="color:${c}">${critic.score}</b>
+      <span class="text-[11px] text-muted">Critici${critic.count ? ` · ${critic.count}` : ''}</span></div>`);
+  }
+  for (const [k, t] of [['hastily', 'Verhaal'], ['normally', "+ Extra's"], ['completely', '100%']]) {
+    if (playtime?.[k]) tiles.push(`<div class="flex-1 rounded-xl bg-surface p-2.5 text-center">
+      <b class="block text-[22px] leading-tight">${fmtHours(playtime[k])}</b><span class="text-[11px] text-muted">${t}</span></div>`);
+  }
+  if (!tiles.length) return '';
+  return `<div class="mt-6">${label(playtime ? 'Speeltijd & recensies' : 'Recensies')}<div class="flex gap-1.5">${tiles.join('')}</div>
+    ${playtime ? '<p class="mt-1.5 text-[11px] text-muted">Speeltijd volgens spelers, via IGDB</p>' : ''}</div>`;
+}
+
 function renderDetail() {
   const v = viewOf(currentRef);
   if (!v) return;
@@ -754,6 +774,9 @@ function renderDetail() {
   const summaryNote = info?.summaryLang === 'nl-vertaald' ? 'Automatisch vertaald uit het Engels' : info?.summaryLang === 'en' ? 'Alleen in het Engels beschikbaar' : '';
   const loadingInfo = !info && online() && (g.igdbId || g.qid || g.wikiTitle);
   const ytSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(g.title + ' trailer')}`;
+  const extra = extrasFor(g.igdbId);
+  const critic = info?.critic || extra?.critic;
+  const playtime = info?.playtime || extra?.playtime;
 
   $('#detailBody').innerHTML = `
     <div class="flex items-end gap-4">
@@ -775,6 +798,8 @@ function renderDetail() {
       ${trailer ? `<button data-trailer="${esc(trailer)}" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ink p-3 font-bold text-bg [&_svg]:size-4">${ICONS.play}Trailer</button>`
         : `<a href="${ytSearch}" target="_blank" rel="noopener" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold [&_svg]:size-4">${ICONS.play}Zoek trailer op YouTube</a>`}
     </div>
+
+    ${scoresHTML(critic, playtime)}
 
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
@@ -1190,6 +1215,7 @@ document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.prev
 // ---------- Start ----------
 render();
 loadDataset().then(() => { if (prefs.tab === 'home' || prefs.tab === 'discover') render(); enrichOwned(); }).catch(() => {});
+loadExtras().then(() => { if (!$('#detailScreen').hidden) renderDetail(); });
 // Nieuwe gamedatabase binnen (wekelijkse update of de knop in Meer): opnieuw tekenen
 onDatasetUpdate(() => { render(); enrichOwned(); });
 registerSW({ immediate: true });

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "data": "node --env-file-if-exists=.env scripts/build-data.mjs"
+    "data": "node --env-file-if-exists=.env scripts/build-data.mjs",
+    "extras": "node --env-file-if-exists=.env scripts/build-extras.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.5",

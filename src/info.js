@@ -101,6 +101,8 @@ export async function fetchDetails(g) {
         if (d.youtube) info.youtube = d.youtube;
         if (d.wikiTitle) info.wikiTitle = d.wikiTitle;
         if (d.nlTitle) info.nlTitle = d.nlTitle;
+        if (d.critic) info.critic = d.critic;
+        if (d.playtime) info.playtime = d.playtime;
         igdbSummary = d.summary || '';
       }
     } catch {}
