@@ -29,6 +29,31 @@ if (process.env.CI && !upload) {
 const PLATFORM_IDS = Object.keys(NINTENDO_PLATFORMS).map(Number);
 // Hoofdgame, standalone uitbreiding, remake, remaster, uitgebreide game, port (geen DLC, bundels, updates)
 const GAME_TYPES = [0, 4, 8, 9, 10, 11];
+// Onofficiële games (fangames, bootlegs, ROM-hacks) weglaten: IGDB-trefwoorden
+const KW_UNOFFICIAL = new Set([2004 /* unofficial */, 1603 /* bootleg */, 16696 /* rom hack */]);
+const KW_FANGAME = 24124; // fangame: alleen houden als hij bekend genoeg is (bv. Touhou-games op Switch)
+// Laatste jaar met officiële releases per oud platform; latere games zijn vrijwel altijd homebrew
+const RETRO_END = {
+  NES: 1995, FDS: 1991, SNES: 2000, N64: 2002, 'Game Boy': 2001, GBC: 2003, GBA: 2008,
+  'Virtual Boy': 1996, 'Game & Watch': 1992, 'Pokémon mini': 2002, GameCube: 2007,
+};
+const POPULAR = 10; // populariteit waarboven we een game altijd houden
+
+function unofficial(g, plats, release, pop) {
+  const kw = g.keywords || [];
+  if (kw.some(k => KW_UNOFFICIAL.has(k))) return true;
+  if (pop >= POPULAR) return false;
+  const retroOnly = plats.length > 0 && plats.every(p => RETRO_END[p]);
+  // Fangame op een oud platform; op Switch e.d. zijn het officiële uitgaves (Touhou e.d.)
+  if (kw.includes(KW_FANGAME) && retroOnly) return true;
+  // Alleen op oude platforms en jaren na het einde ervan uitgekomen: homebrew.
+  // Uitzondering: games uit een bekende reeks (bv. Shantae Advance in 2025)
+  const year = parseInt(release, 10);
+  const series = g.franchise || g.franchises?.length;
+  if (year && retroOnly && !series && plats.every(p => year > RETRO_END[p] + 1)) return true;
+  return false;
+}
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const iso = (unix) => new Date(unix * 1000).toISOString().slice(0, 10);
 
@@ -53,7 +78,7 @@ process.stdout.write('IGDB ophalen');
 for (;;) {
   const page = await igdb('games', `fields name, first_release_date, platforms, cover.image_id,
   release_dates.date, release_dates.date_format, release_dates.platform,
-  franchise.name, franchises.name, collections.name, genres.name, total_rating_count, hypes;
+  franchise.name, franchises.name, collections.name, genres.name, total_rating_count, hypes, keywords;
 where platforms = (${PLATFORM_IDS.join(',')}) & version_parent = null & game_type = (${GAME_TYPES.join(',')})
   & (cover != null | first_release_date != null) & id > ${lastId};
 sort id asc;
@@ -71,8 +96,11 @@ console.log(` ${raw.length} games in ${Math.round((Date.now() - started) / 1000)
 const platforms = [], franchises = [], genres = [];
 const idx = (list, v) => { let i = list.indexOf(v); if (i < 0) i = list.push(v) - 1; return i; };
 
+let skipped = 0;
 const games = raw.map(g => {
   const plats = [...new Set((g.platforms || []).map(p => NINTENDO_PLATFORMS[p]).filter(Boolean))];
+  const pop = (g.total_rating_count || 0) + (g.hypes || 0);
+  if (unofficial(g, plats, releaseOf(g), pop)) { skipped++; return null; }
   const franchise = g.franchise?.name || g.franchises?.[0]?.name || g.collections?.[0]?.name || null;
   return [
     g.id,
@@ -82,9 +110,10 @@ const games = raw.map(g => {
     g.cover?.image_id || 0,
     franchise ? idx(franchises, franchise) : -1,
     (g.genres || []).map(x => idx(genres, x.name)),
-    (g.total_rating_count || 0) + (g.hypes || 0),
+    pop,
   ];
-}).filter(g => g[3].length);
+}).filter(g => g && g[3].length);
+console.log(`${skipped} onofficiële games / homebrew overgeslagen`);
 
 const data = { version: 3, source: 'igdb', generated: new Date().toISOString(), platforms, franchises, genres, games };
 const text = JSON.stringify(data);
