@@ -41,6 +41,8 @@
 .modal { animation: modal-in 0.5s cubic-bezier(0.32, 0.72, 0, 1) both; box-shadow: 0 -10px 40px rgba(0, 0, 0, .35); }
 .modal.modal-out { animation: modal-out 0.32s cubic-bezier(0.4, 0, 0.9, 0.5) both; }
 #modalBackdrop.is-on { opacity: .45; }
+/* Scherm staat stil: geen animatie en schaduw meer (anders wazige tekst op iOS, zie showScreen) */
+section.settled { animation: none; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { .modal, .modal.modal-out { animation-duration: .01s; } }
 .view-in { animation: fade 0.18s ease-out; }
 

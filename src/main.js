@@ -319,8 +319,14 @@ function syncBackdrop() {
   }
 }
 
+// iOS Safari houdt een geanimeerd scherm (met grote schaduw) als losse laag vast en tekent tekst
+// daarop soms wazig. Na de inschuif-animatie dus animatie en schaduw weg.
+document.addEventListener('animationend', (e) => {
+  if (e.target.matches?.('section.animate-push, section.animate-slide-up')) e.target.classList.add('settled');
+});
+
 function showScreen(el) {
-  el.classList.remove('screen-out', 'sheet-out', 'modal-out');
+  el.classList.remove('screen-out', 'sheet-out', 'modal-out', 'settled');
   el.style.transform = '';
   el.style.transition = '';
   el.hidden = false;
@@ -331,6 +337,7 @@ function hideScreen(el, { animate = true, after } = {}) {
   if (el.hidden) return;
   const modal = el.classList.contains('modal');
   if (modal) { openModals.delete(el); syncBackdrop(); }
+  el.classList.remove('settled'); // anders blokkeert 'animation: none' de uitschuif-animatie
   if (!animate) { el.hidden = true; after?.(); return; }
   el.classList.add(modal ? 'modal-out' : el.id === 'detailScreen' || el.id === 'folderScreen' ? 'screen-out' : 'sheet-out');
   setTimeout(() => {
@@ -901,6 +908,12 @@ function openFolder(title, allItems, meta, opts = {}) {
   showScreen($('#folderScreen'));
 }
 
+function setFolderMeta(text) {
+  const el = $('#folderMeta');
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 function drawFolder() {
   const { title, allItems, meta: givenMeta, opts: { owned = false, split = false, sub = null } } = folderState;
   const items = allItems.filter(byPlatform);
@@ -920,11 +933,12 @@ function drawFolder() {
     const soonCard = (e) => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || 'Nog niet verschenen' }).replace('<button ', '<button data-soon ');
     body.innerHTML = head('Nog niet verschenen', soon.length) + soon.map(soonCard).join('')
       + (out.length ? head('Verschenen', out.length, 'mt-3') + out.map(card).join('') : '');
-    $('#folderMeta').textContent = meta ?? `${count} · ${soon.length} binnenkort`;
+    // Aantallen staan al bij de kopjes; alleen een filter-/eigen regel tonen
+    setFolderMeta(givenMeta || platformFilterOn() ? meta ?? count : '');
   } else {
     body.innerHTML = items.length ? items.map(card).join('')
       : `<div class="col-span-full">${notice(`Geen games op ${esc(prefs.platforms.join(', '))}.<small><button data-filter-clear class="font-semibold text-accent">Filter wissen</button></small>`)}</div>`;
-    $('#folderMeta').textContent = meta ?? count;
+    setFolderMeta(meta ?? count);
   }
   hydrate(body);
 }
