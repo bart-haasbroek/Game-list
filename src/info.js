@@ -78,34 +78,62 @@ async function labels(ids) {
   return ids.map(id => labelsCache.get(id)).filter(Boolean);
 }
 
+// Nederlandse Wikipedia-titel via de taallinks van het Engelse artikel
+async function dutchTitle(enTitle) {
+  const data = await getJSON(`${WP('en')}&action=query&redirects=1&prop=langlinks&lllang=nl&titles=${encodeURIComponent(enTitle)}`);
+  return data.query?.pages?.[0]?.langlinks?.[0]?.title || null;
+}
+
 /**
- * Haalt extra info op voor een game. `g` heeft (een deel van): qid, wikiTitle, nlTitle, summary (Engels).
- * Geeft terug: { summary, summaryLang, developers, publishers, genres, release, youtube, nlTitle, wikiTitle }
+ * Haalt extra info op voor een game. `g` heeft (een deel van): igdbId, qid, wikiTitle, nlTitle, summary (Engels).
+ * Bron: IGDB (via /api/game). Wikipedia voor een Nederlandse omschrijving, Wikidata als reserve voor oude games.
+ * Geeft terug: { summary, summaryLang, developers, publishers, genres, youtube, nlTitle, wikiTitle }
  */
 export async function fetchDetails(g) {
   const info = {};
-  if (g.qid) {
-    const data = await getJSON(`${WD}&action=wbgetentities&props=claims|sitelinks&sitefilter=enwiki|nlwiki&ids=${g.qid}`);
-    const e = data.entities?.[g.qid];
-    if (e) {
-      const ids = (p) => (e.claims?.[p] || []).filter(c => c.rank !== 'deprecated').map(c => c.mainsnak?.datavalue?.value?.id).filter(Boolean);
-      const [developers, publishers, genres] = await Promise.all([labels(ids('P178')), labels(ids('P123')), labels(ids('P136'))]);
-      Object.assign(info, { developers, publishers, genres: genres.map(x => x.charAt(0).toUpperCase() + x.slice(1)) });
-      const yt = (e.claims?.P1651 || []).map(c => c.mainsnak?.datavalue?.value).find(Boolean);
-      if (yt) info.youtube = yt;
-      info.nlTitle = e.sitelinks?.nlwiki?.title || g.nlTitle || null;
-      info.wikiTitle = e.sitelinks?.enwiki?.title || g.wikiTitle || null;
-    }
+  let igdbSummary = '';
+  if (g.igdbId) {
+    try {
+      const res = await fetch('/api/game?id=' + encodeURIComponent(g.igdbId));
+      if (res.ok && (res.headers.get('content-type') || '').includes('json')) {
+        const d = await res.json();
+        Object.assign(info, { developers: d.developers, publishers: d.publishers, genres: d.genres });
+        if (d.youtube) info.youtube = d.youtube;
+        if (d.wikiTitle) info.wikiTitle = d.wikiTitle;
+        if (d.nlTitle) info.nlTitle = d.nlTitle;
+        igdbSummary = d.summary || '';
+      }
+    } catch {}
   }
-  const nlTitle = info.nlTitle ?? g.nlTitle;
-  const enTitle = info.wikiTitle ?? g.wikiTitle;
+  if (!info.developers && g.qid) {
+    try {
+      const data = await getJSON(`${WD}&action=wbgetentities&props=claims|sitelinks&sitefilter=enwiki|nlwiki&ids=${g.qid}`);
+      const e = data.entities?.[g.qid];
+      if (e) {
+        const ids = (p) => (e.claims?.[p] || []).filter(c => c.rank !== 'deprecated').map(c => c.mainsnak?.datavalue?.value?.id).filter(Boolean);
+        const [developers, publishers, genres] = await Promise.all([labels(ids('P178')), labels(ids('P123')), labels(ids('P136'))]);
+        Object.assign(info, { developers, publishers, genres: genres.map(x => x.charAt(0).toUpperCase() + x.slice(1)) });
+        const yt = (e.claims?.P1651 || []).map(c => c.mainsnak?.datavalue?.value).find(Boolean);
+        if (yt && !info.youtube) info.youtube = yt;
+        info.nlTitle = info.nlTitle || e.sitelinks?.nlwiki?.title || null;
+        info.wikiTitle = info.wikiTitle || e.sitelinks?.enwiki?.title || null;
+      }
+    } catch {}
+  }
+  const enTitle = info.wikiTitle || g.wikiTitle || null;
+  let nlTitle = info.nlTitle || g.nlTitle || null;
+  if (!nlTitle && enTitle) {
+    try { nlTitle = await dutchTitle(enTitle); if (nlTitle) info.nlTitle = nlTitle; } catch {}
+  }
+  if (enTitle) info.wikiTitle = enTitle;
   try {
+    // 1. Nederlandse Wikipedia  2. IGDB-omschrijving vertaald  3. Engelse Wikipedia vertaald
     if (nlTitle) {
       info.summary = await extract('nl', nlTitle);
-      info.summaryLang = 'nl';
+      if (info.summary) info.summaryLang = 'nl';
     }
     if (!info.summary) {
-      const en = enTitle ? await extract('en', enTitle) : g.summary || '';
+      const en = igdbSummary || g.summary || (enTitle ? await extract('en', enTitle) : '');
       if (en) {
         try { info.summary = await translateToDutch(en); info.summaryLang = 'nl-vertaald'; }
         catch { info.summary = en; info.summaryLang = 'en'; }

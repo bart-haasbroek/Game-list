@@ -25,8 +25,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // games.json (offline gamelijst) gaat mee, zodat zoeken ook zonder internet werkt
-        globPatterns: ['**/*.{js,css,html,png,svg,json}'],
+        // De gamedatabase zit niet in de precache: die komt uit /api/games en wordt door de app zelf bewaard (src/data.js)
+        globPatterns: ['**/*.{js,css,html,png,svg}'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/api\//, /^\/\.netlify\//],
         runtimeCaching: [

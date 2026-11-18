@@ -1,0 +1,36 @@
+# Werkt de gamedatabase bij: haalt alle Nintendo-games uit IGDB en zet ze in Netlify Blobs.
+# Geen nieuwe deploy nodig: de app ziet de nieuwe data via /api/games-meta.
+#
+# Secrets (GitHub > Settings > Secrets and variables > Actions):
+#   TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET  - IGDB
+#   NETLIFY_AUTH_TOKEN                      - Netlify > User settings > Applications > Personal access tokens
+#   NETLIFY_SITE_ID                         - Netlify > Site configuration > General > Site ID
+name: Gamedata bijwerken
+
+on:
+  schedule:
+    - cron: '0 4 * * 1' # elke maandag 04:00 UTC
+  workflow_dispatch: # handmatig: knop in de app (via /api/refresh) of in GitHub > Actions
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - name: IGDB ophalen en uploaden naar Netlify Blobs
+        run: node scripts/build-data.mjs
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

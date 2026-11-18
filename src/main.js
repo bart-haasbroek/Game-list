@@ -3,11 +3,11 @@ import { registerSW } from 'virtual:pwa-register';
 import { searchIGDB, searchWikipedia, SourceUnavailable } from './sources.js';
 import {
   loadDataset, datasetInfo, getEntry, searchDataset, franchiseList, franchiseGames, franchiseCover,
-  upcoming, isFuture, formatRelease, countdown, normalize,
+  upcoming, isFuture, formatRelease, countdown, normalize, findEntry, checkForUpdate, onDatasetUpdate,
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '3.0.0';
 const COVER_CACHE = 'covers-v2';
 
 // ---------- Iconen ----------
@@ -629,6 +629,19 @@ function renderMore() {
       </div>
     </div>
     <div>
+      ${label('Gamedatabase')}
+      <div class="rounded-2xl bg-surface p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="font-semibold">${info ? `${info.count.toLocaleString('nl-NL')} Nintendo-games` : 'Nog niet geladen'}</div>
+            <div id="dataStatus" class="text-[12px] text-muted">${info ? `Bijgewerkt ${formatDateTime(info.generated)}` : ''}</div>
+          </div>
+          <button id="refreshBtn" class="flex-none rounded-xl bg-accent px-4 py-2.5 font-bold text-white disabled:opacity-50" ${refreshing ? 'disabled' : ''}>${refreshing ? 'Bezig…' : 'Nu bijwerken'}</button>
+        </div>
+        <p class="mt-2 text-[12px] text-muted">Bron: IGDB. Wordt elke maandag automatisch bijgewerkt.</p>
+      </div>
+    </div>
+    <div>
       ${label('Back-up')}
       <div class="grid grid-cols-2 gap-2">
         <button id="exportBtn" class="rounded-xl bg-accent p-3.5 font-bold text-white">Exporteren</button>
@@ -637,14 +650,15 @@ function renderMore() {
       <p class="mt-2 text-center text-[12px] text-muted">Je games staan alleen op dit toestel. Maak af en toe een back-up.</p>
     </div>
     <div class="text-center text-[12px] leading-relaxed text-muted">
-      Offline gamelijst: ${info ? `${info.count.toLocaleString('nl-NL')} games (bijgewerkt ${formatRelease(info.generated)})` : 'nog niet geladen'}<br>
-      Gegevens: Wikidata & Wikipedia (CC BY-SA)${igdbAvailable ? ' · IGDB' : ''}<br>
+      Gegevens: IGDB · omschrijvingen: Wikipedia (CC BY-SA)<br>
       <span id="storageInfo" class="block empty:hidden"></span>
       Versie ${APP_VERSION}
     </div>
   `;
   storageInfoText().then(t => { const el = $('#storageInfo'); if (el) el.textContent = t; });
   $('#exportBtn').onclick = exportBackup;
+  $('#refreshBtn').onclick = startRefresh;
+  if (refreshing && refreshText) $('#dataStatus').textContent = refreshText;
   $('#importBtn').onclick = () => $('#importInput').click();
 }
 
@@ -691,7 +705,7 @@ async function loadDetails() {
   const { g, owned } = v;
   const have = owned ? g.info : detailsCache.get(g.key);
   if (have) return;
-  if (!g.qid && !g.wikiTitle && !g.summary) return;
+  if (!g.igdbId && !g.qid && !g.wikiTitle && !g.summary) return;
   const ref = currentRef;
   try {
     const info = await fetchDetails(g);
@@ -738,7 +752,7 @@ function renderDetail() {
 
   const summary = info?.summary || (g.summary && !info ? g.summary : '');
   const summaryNote = info?.summaryLang === 'nl-vertaald' ? 'Automatisch vertaald uit het Engels' : info?.summaryLang === 'en' ? 'Alleen in het Engels beschikbaar' : '';
-  const loadingInfo = !info && online() && (g.qid || g.wikiTitle);
+  const loadingInfo = !info && online() && (g.igdbId || g.qid || g.wikiTitle);
   const ytSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(g.title + ' trailer')}`;
 
   $('#detailBody').innerHTML = `
@@ -987,6 +1001,53 @@ function saveManual() {
   openDetail(rec.id);
 }
 
+// ---------- Gamedatabase handmatig bijwerken ----------
+// Start de GitHub Action via /api/refresh en wacht tot de nieuwe data in Netlify Blobs staat.
+let refreshing = false;
+let refreshText = '';
+const formatDateTime = (iso) => {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+const setRefreshStatus = (text) => {
+  refreshText = text;
+  const el = $('#dataStatus');
+  if (el) el.textContent = text;
+};
+
+async function startRefresh() {
+  if (refreshing) return;
+  if (!online()) { toast('Je bent offline'); return; }
+  refreshing = true;
+  renderIfMore();
+  try {
+    const res = await fetch('/api/refresh', { method: 'POST' });
+    const data = (res.headers.get('content-type') || '').includes('json') ? await res.json() : {};
+    if (!res.ok) throw new Error(data.error || 'Bijwerken is hier niet beschikbaar');
+    const since = data.started ? Date.parse(data.startedAt) - 30000 : Date.parse(data.run?.createdAt || 0) - 1000;
+    setRefreshStatus('Bezig met ophalen uit IGDB… (± 2 minuten)');
+    const deadline = Date.now() + 15 * 60 * 1000;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 10000));
+      if (Date.now() > deadline) throw new Error('Duurt te lang, probeer het later opnieuw');
+      const st = await (await fetch('/api/refresh')).json().catch(() => ({}));
+      const run = st.run;
+      if (!run || Date.parse(run.createdAt) < since || run.status !== 'completed') continue;
+      if (run.conclusion !== 'success') throw new Error('Bijwerken mislukt');
+      const changed = await checkForUpdate().catch(() => false);
+      toast(changed ? 'Gamedatabase bijgewerkt' : 'Gamedatabase was al up-to-date');
+      break;
+    }
+  } catch (e) {
+    toast(e.message || 'Bijwerken mislukt');
+  } finally {
+    refreshing = false;
+    refreshText = '';
+    renderIfMore();
+  }
+}
+const renderIfMore = () => { if (prefs.tab === 'more') render(); };
+
 // ---------- Back-up ----------
 async function exportBackup() {
   const data = JSON.stringify({ app: 'game-list', version: 2, exportedAt: new Date().toISOString(), games }, null, 2);
@@ -1043,13 +1104,20 @@ async function enrichOwned() {
   try {
     await loadDataset().catch(() => {});
     let changed = false;
-    // Gegevens uit de offline lijst overnemen (bv. voor games uit een oudere versie)
+    // Gegevens uit de gamedatabase overnemen. Games uit een oudere versie (Wikidata) krijgen
+    // via hun titel een IGDB-id, zodat ze weer aan de database gekoppeld zijn.
     for (const g of games) {
-      const e = g.sourceKey && getEntry(g.sourceKey);
+      let e = (g.sourceKey && getEntry(g.sourceKey)) || (g.igdbId && getEntry('igdb:' + g.igdbId));
+      if (!e && !g.igdbId) {
+        e = findEntry(g.title, g.year, g.platforms);
+        if (e) { g.igdbId = e.igdbId; g.sourceKey = e.key; g.source = 'igdb'; g.info = null; changed = true; }
+      }
       if (!e) continue;
-      for (const k of ['qid', 'release', 'franchise', 'coverFile', 'wikiTitle', 'nlTitle', 'youtube']) {
+      for (const k of ['release', 'franchise', 'youtube']) {
         if (!g[k] && e[k]) { g[k] = e[k]; changed = true; }
       }
+      if (!g.genres?.length && e.genres?.length) { g.genres = e.genres; changed = true; }
+      if (!g.cover && e.cover) { g.cover = e.cover; cacheCover(g.cover); changed = true; }
       const merged = [...new Set([...(g.platforms || []), ...e.platforms])];
       if (merged.length !== (g.platforms || []).length) { g.platforms = merged; changed = true; }
     }
@@ -1061,7 +1129,7 @@ async function enrichOwned() {
     }
     if (changed) { saveGames(); render(); }
     // Info (omschrijving, makers, genres): rustig één voor één
-    for (const g of games.filter(x => !x.info && (x.qid || x.wikiTitle))) {
+    for (const g of games.filter(x => !x.info && (x.igdbId || x.qid || x.wikiTitle))) {
       try {
         const info = await fetchDetails(g);
         info.fetchedAt = Date.now();
@@ -1122,6 +1190,8 @@ document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.prev
 // ---------- Start ----------
 render();
 loadDataset().then(() => { if (prefs.tab === 'home' || prefs.tab === 'discover') render(); enrichOwned(); }).catch(() => {});
+// Nieuwe gamedatabase binnen (wekelijkse update of de knop in Meer): opnieuw tekenen
+onDatasetUpdate(() => { render(); enrichOwned(); });
 registerSW({ immediate: true });
 requestPersist();
 migrateCoverCache();
