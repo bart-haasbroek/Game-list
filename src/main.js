@@ -11,7 +11,7 @@ import { loadExtras, extrasFor } from './extras.js';
 import { loadHltb, hltbFor } from './hltb.js';
 import { mountNotes, destroyNotes, notesPreviewHTML, notesText, preloadNotes } from './notes.js';
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.2.0';
 document.documentElement.setAttribute('data-version', APP_VERSION); // voor de foutmeldingen (index.html)
 const COVER_CACHE = 'covers-v2';
 
@@ -52,6 +52,8 @@ const LISTS = [
 const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', stopped: '#b5776b' };
 const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'completed', 'stopped'];
 const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
+// Veilig opzoeken: een onbekende lijst (bv. 'interested' via sync van een oud toestel) mag nooit een crash geven
+const listOf = (id) => listById[id] || listById.wishlist;
 // Lijsten die alleen kunnen als de game al uit is
 const NEEDS_RELEASE = ['playing', 'finished', 'completed', 'stopped'];
 // Uitgespeeld of compleet: allebei 'klaar' (uitspeeldatum, 'uitgespeeld in <jaar>', Laatst uitgespeeld)
@@ -82,6 +84,20 @@ const shortPlatform = (p) => {
   for (const [re, s] of PLATFORM_SHORT) if (re.test(name)) return s;
   return (typeof p === 'object' && p.abbreviation) || name;
 };
+// Platform van de eerste release: het nieuwste platform dat al bestond toen de game uitkwam
+// (IGDB zet ze in willekeurige volgorde: Super Mario Odyssey kreeg anders "Switch 2", SM64 "Wii")
+const PLATFORM_LAUNCH = { NES: 1983, FDS: 1986, 'Game Boy': 1989, SNES: 1990, 'Virtual Boy': 1995, N64: 1996, GBC: 1998, GBA: 2001,
+  GameCube: 2001, DS: 2004, Wii: 2006, DSi: 2008, '3DS': 2011, 'Wii U': 2012, 'New 3DS': 2014, Switch: 2017, 'Switch 2': 2025 };
+function orderPlatforms(list, year) {
+  const names = [...new Set((list || []).map(shortPlatform))];
+  const launch = (p) => PLATFORM_LAUNCH[p] ?? 9999;
+  if (!year) return names;
+  const before = names.filter(p => launch(p) <= year).sort((a, b) => launch(b) - launch(a));
+  const main = before[0];
+  return main ? [main, ...names.filter(p => p !== main).sort((a, b) => launch(a) - launch(b))] : names;
+}
+const mainPlatform = (e) => orderPlatforms(e.platforms, e.year || Number(String(e.release || '').slice(0, 4)) || null)[0];
+
 // Oude consoles die ook via Nintendo Switch Online te spelen zijn
 const NSO_PLATFORMS = ['NES', 'SNES', 'N64', 'Game Boy', 'GBC', 'GBA', 'GameCube', 'Virtual Boy'];
 // Platforms waarop jij de game speelt/gespeeld hebt (meerdere mogelijk, bv. GBA + Switch Online)
@@ -95,7 +111,9 @@ const store = {
   load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
   save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { toast('Opslaan mislukt'); } },
 };
-let games = store.load('gl.games', []);
+// Altijd een lijst met game-objecten, ook als de opslag iets anders bevat (oude/kapotte gegevens)
+const asGameList = (v) => (Array.isArray(v) ? v : []).filter(g => g && typeof g === 'object' && g.id);
+let games = asGameList(store.load('gl.games', []));
 // Van één platform (myPlatform) naar een lijst (myPlatforms); geen echte wijziging, dus vóór de sync-snapshot
 if (games.some(g => g.status === 'interested')) { games.forEach(fixStatus); store.save('gl.games', games); }
 for (const g of games) if (!Array.isArray(g.myPlatforms)) g.myPlatforms = g.myPlatform ? [g.myPlatform] : [];
@@ -209,6 +227,48 @@ function coverHTML(g, { cls = '', extra = '', placeholder = true, w = COVER_W } 
   </div>`;
 }
 
+// Geen flitsende afbeeldingen bij opnieuw tekenen: de app bouwt schermen opnieuw op met innerHTML. Komt een
+// plaatje terug dat net nog geladen in beeld stond, dan zetten we het oude (al gedecodeerde) <img>-element
+// terug. Een MutationObserver draait vóór de browser tekent, dus je ziet het nieuwe, lege plaatje nooit.
+const imgsIn = (n) => (n.nodeType !== 1 ? [] : n.tagName === 'IMG' ? [n] : [...n.querySelectorAll('img[src]')]);
+const IMG_WATCH = { childList: true, subtree: true };
+// Sleutel: de eerste link van het plaatje (met formaat). Blijft gelijk, ook als het daarna op de
+// reservelink (origineel) terugviel; wordt gezet zodra het plaatje in de pagina komt.
+const imgKey = (img) => img.dataset.k || img.getAttribute('src');
+// Verdwenen, geladen plaatjes blijven even bewaard (laatste 150), ook voor een latere opbouw (bv. filter uit)
+const pool = new Map();
+const POOL_MAX = 150;
+const imgReuse = new MutationObserver((records) => {
+  for (const r of records) for (const n of r.addedNodes) for (const img of imgsIn(n)) img.dataset.k ||= img.getAttribute('src');
+  for (const r of records) for (const n of r.removedNodes) for (const img of imgsIn(n)) {
+    if (!img.complete || !img.naturalWidth || img.isConnected) continue;
+    const key = imgKey(img);
+    pool.delete(key); pool.set(key, img); // achteraan = nieuwst
+    if (pool.size > POOL_MAX) pool.delete(pool.keys().next().value);
+  }
+  if (!pool.size) return;
+  const swaps = [];
+  for (const r of records) for (const n of r.addedNodes) for (const img of imgsIn(n)) {
+    const key = imgKey(img), old = pool.get(key);
+    if (!old || old === img || !img.isConnected) continue;
+    pool.delete(key); // elk oud plaatje maar één keer hergebruiken
+    swaps.push([img, old]);
+  }
+  if (!swaps.length) return;
+  // Onze eigen vervangingen niet opnieuw laten zien (anders wisselen oud en nieuw eindeloos om)
+  imgReuse.disconnect();
+  for (const [img, old] of swaps) {
+    old.className = img.className;
+    old.style.cssText = img.style.cssText;
+    old.style.opacity = 1; // was al zichtbaar: niet opnieuw infaden
+    old.style.transition = 'none';
+    img.replaceWith(old);
+  }
+  imgReuse.takeRecords();
+  imgReuse.observe(document.body, IMG_WATCH);
+});
+imgReuse.observe(document.body, IMG_WATCH);
+
 // Covers zonder bekende link ophalen zodra ze in beeld zijn (per 50 tegelijk)
 async function hydrate(root) {
   if (!online()) return;
@@ -284,7 +344,7 @@ function cardHTML(g, { ref, sub } = {}) {
   const owned = ref ? null : g;
   const mine = owned || ownedBy(g.key);
   const subline = sub ?? [platLabel(g), g.year].filter(Boolean).join(' · ');
-  const ownedTag = !owned && mine ? `<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">${esc(listById[mine.status].short)}</span>` : '';
+  const ownedTag = !owned && mine ? `<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">${esc(listOf(mine.status).short)}</span>` : '';
   return `<button data-open="${esc(ref || g.id)}" class="group min-w-0 text-left">
     ${coverHTML(mine && !owned ? { ...g, cover: mine.cover || g.cover } : g, { cls: 'group-active:scale-95', extra: badgeHTML(mine || g) + ownedTag })}
     <div class="mt-1.5 line-clamp-2 text-[12.5px] font-semibold">${esc(g.title)}</div>
@@ -645,7 +705,7 @@ function renderHome() {
       ${coverHTML(g, { cls: 'w-12 flex-none rounded-md! shadow-none!', placeholder: false, w: THUMB_W })}
       <div class="min-w-0 flex-1">
         <div class="truncate font-semibold">${esc(g.title)}</div>
-        <div class="text-[12px] text-muted">${esc(cd.small)} · ${esc(listById[g.status].label)}</div>
+        <div class="text-[12px] text-muted">${esc(cd.small)} · ${esc(listOf(g.status).label)}</div>
       </div>
       <div class="flex-none pr-1 text-right">
         <div class="text-[24px] font-extrabold leading-none text-accent">${esc(cd.big)}</div>
@@ -654,8 +714,10 @@ function renderHome() {
     </button>`;
   }).join('');
 
+  // Hoofdgame vooraan, daarna de rest op wanneer je begon
   const playing = games.filter(g => g.status === 'playing')
-    .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
+    .sort((a, b) => (b.id === prefs.heroId) - (a.id === prefs.heroId)
+      || String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
   const top = games.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating).slice(0, 10);
   // "Laatst uitgespeeld": alleen games met een uitspeeldatum. Games zonder datum (bv. in één keer via
   // swipen toegevoegd) zijn niet 'laatst' uitgespeeld; die staan gewoon in Bibliotheek > Uitgespeeld.
@@ -666,12 +728,12 @@ function renderHome() {
   const hero = heroGame(playing) || lastFinished[0] || bestDone || null;
   const nintendoUpcoming = upcoming(30).filter(e => !ownedBy(e.key)).slice(0, 15);
 
-  // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
+  // "Aan het spelen": tik = info-pagina, lang indrukken = hoofdgame (groot bovenaan)
   const playCard = (g) => {
-    // Rand + label alleen als er iets te kiezen valt: zo zie je welke game bovenaan in beeld staat
+    // Rand + label alleen als er iets te kiezen valt: zo zie je welke game je hoofdgame is
     const sel = g === hero && playing.length > 1;
-    const tag = sel ? '<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">Uitgelicht</span>' : '';
-    return `<button data-hero="${g.id}" aria-pressed="${sel}" title="${sel ? 'Staat bovenaan · tik nog eens voor de info' : 'Tik om bovenaan te zetten'}" class="flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-inset ring-accent/70' : 'active:bg-surface'}">
+    const tag = sel ? '<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">Hoofdgame</span>' : '';
+    return `<button data-hero="${g.id}" aria-pressed="${sel}" title="${sel ? 'Je hoofdgame · tik voor de info' : 'Tik voor de info · houd ingedrukt om je hoofdgame te maken'}" class="play-card flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-inset ring-accent/70' : 'active:bg-surface'}">
       ${coverHTML(g, { cls: 'w-full', extra: tag })}
       <div class="mt-2 truncate text-[15px] font-semibold">${esc(g.title)}</div>
       <div class="truncate text-[13px] ${sel ? 'font-semibold text-accent' : 'text-muted'}">${esc(platLabel(g))}</div>
@@ -688,7 +750,7 @@ function renderHome() {
     ${restoreCard}
     ${playing.length ? homeHead('Aan het spelen', 'data-tab="playing"')
       + `<div class="row-scroller play-row no-scrollbar -mx-4 flex items-start gap-2 overflow-x-auto px-3 py-1 [&>*]:w-[148px]">${playing.map(playCard).join('')}</div>
-      ${playing.length > 1 ? '<p class="mt-1 text-[12px] text-muted">Tik op een game om hem bovenaan te zetten, nog eens tikken opent de info.</p>' : ''}` : ''}
+      ${playing.length > 1 && !playing.some(g => g.id === prefs.heroId) ? '<p class="mt-1 text-[12px] text-muted">Houd een game ingedrukt om hem je hoofdgame te maken; die staat groot bovenaan.</p>' : ''}` : ''}
     ${mineUpcoming.length ? homeHead('Afteller') + `<div class="flex flex-col gap-2">${countdownRows}</div>` : ''}
     ${homeHead('Overzicht')}
     <div class="home-tiles grid grid-cols-2 gap-2.5">
@@ -708,6 +770,42 @@ function renderHome() {
   hydrate(el);
   ensureArtwork(hero);
 }
+
+// ---------- Home: hoofdgame kiezen door lang indrukken (Aan het spelen) ----------
+const LONG_PRESS = 450;
+const pressRoot = $('#homeView');
+let pressTimer = null, pressCard = null, pressX = 0, pressY = 0, longPressed = false;
+function cancelPress() {
+  clearTimeout(pressTimer); pressTimer = null;
+  pressCard?.classList.remove('is-pressing');
+  pressCard = null;
+}
+function makeMainGame(id) {
+  const g = games.find(x => x.id === id);
+  if (!g) return;
+  navigator.vibrate?.(15);
+  if (prefs.heroId !== id) { prefs.heroId = id; savePrefs(); }
+  renderHome();
+  $('#homeView .play-row')?.scrollTo({ left: 0, behavior: 'smooth' }); // nieuwe hoofdgame staat vooraan
+  pressRoot.scrollTo({ top: 0, behavior: 'smooth' });
+  toast(`${g.title} is je hoofdgame`);
+}
+pressRoot.addEventListener('pointerdown', (e) => {
+  const card = e.target.closest('[data-hero]');
+  if (!card || e.button > 0) return;
+  cancelPress();
+  longPressed = false;
+  pressCard = card; pressX = e.clientX; pressY = e.clientY;
+  card.classList.add('is-pressing');
+  pressTimer = setTimeout(() => { longPressed = true; const id = card.dataset.hero; cancelPress(); makeMainGame(id); }, LONG_PRESS);
+});
+pressRoot.addEventListener('pointermove', (e) => {
+  if (pressCard && Math.hypot(e.clientX - pressX, e.clientY - pressY) > 10) cancelPress(); // scrollen, geen indrukken
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => pressRoot.addEventListener(t, cancelPress));
+pressRoot.addEventListener('scroll', cancelPress, { passive: true, capture: true });
+// Geen iOS-menu (afbeelding bewaren/delen) bij lang indrukken op een kaartje
+pressRoot.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-hero]')) e.preventDefault(); });
 
 // ---------- Home: trek-om-te-vergroten en parallax op de kop ----------
 const homeEl = $('#homeView');
@@ -837,14 +935,14 @@ function discoverHomeHTML() {
 
 function resultRow(g, key) {
   const mine = ownedBy(key);
-  const plats = [...new Set((g.platforms || []).map(shortPlatform))];
+  const plats = orderPlatforms(g.platforms, g.year);
   return `<button data-open="${esc(key)}" class="flex w-full items-center gap-3 border-b border-line py-2 text-left">
     ${coverHTML(mine ? { ...g, cover: mine.cover || g.cover } : g, { cls: 'w-12 flex-none rounded-md! shadow-none!', placeholder: false, w: THUMB_W })}
     <div class="min-w-0 flex-1">
       <div class="font-semibold leading-snug">${esc(g.title)}</div>
       <div class="truncate text-[12.5px] text-muted">${esc([formatRelease(g.release) || g.year, plats.join(', ')].filter(Boolean).join(' · '))}</div>
     </div>
-    ${mine ? `<span class="flex-none text-[11px] font-bold text-accent">${esc(listById[mine.status].short)}</span>` : ''}
+    ${mine ? `<span class="flex-none text-[11px] font-bold text-accent">${esc(listOf(mine.status).short)}</span>` : ''}
   </button>`;
 }
 
@@ -927,7 +1025,7 @@ function drawFolder() {
   $('#folderTitle').textContent = title;
   const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}${active ? ` · ${ftext}` : ''}`;
   // Onder de titel het platform waarop je filtert (anders het eerste platform van de game)
-  const plat = (e) => (platformFilterOn() && platformsOf(e).find(p => prefs.platforms.includes(p))) || e.platforms?.[0];
+  const plat = (e) => (platformFilterOn() && platformsOf(e).find(p => prefs.platforms.includes(p))) || mainPlatform(e);
   const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: sub?.(e) ?? [plat(e), e.year].filter(Boolean).join(' · ') });
   const body = $('#folderBody');
   const soon = split ? items.filter(e => isFuture(e.release)) : [];
@@ -1097,12 +1195,15 @@ function openSwipe(set = null) {
 }
 
 function startSwipe(set) {
-  Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, part: 0, no: 0, busy: false });
+  // gen: elke nieuwe stapel krijgt een nieuw nummer, zodat een timer van de vorige stapel niks meer doet
+  Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, part: 0, no: 0, busy: false, gen: (swipe.gen || 0) + 1 });
   renderSwipe();
 }
 
 function renderSwipePicker() {
   swipe.set = null;
+  swipe.gen = (swipe.gen || 0) + 1; // lopende veeg-animatie van de vorige stapel negeren
+  swipe.busy = false;
   $('#swipeTitle').textContent = 'Wat heb ik gespeeld?';
   $('#swipeMeta').textContent = 'Kies een franchise';
   const sets = [SWIPE_TOP, ...franchiseList().map(f => f.name)]
@@ -1133,8 +1234,24 @@ const SWIPE_KINDS = {
   yes: { color: '#4fd18b', label: 'Uitgespeeld', icon: '<path d="M20 6 9 17l-5-5"/>' },
 };
 
+// Volgende kaartjes alvast laden (zelfde formaat als op de kaart), zodat ze er meteen staan bij snel swipen
+const preloaded = new Set();
+function preloadSwipe(list) {
+  for (const e of list) {
+    const src = coverSrc(e);
+    if (!src) continue;
+    const url = imgUrl(src, 640);
+    if (preloaded.has(url)) continue;
+    preloaded.add(url);
+    const im = new Image();
+    im.decoding = 'async';
+    im.onload = () => window.__shown.add(im.src); // dan faadt de kaart niet meer in
+    im.src = url;
+  }
+}
+
 function swipeCardHTML(e, top) {
-  const plats = (e.platforms || []).slice(0, 3).join(', ');
+  const plats = orderPlatforms(e.platforms, e.year).slice(0, 3).join(', ');
   const overlay = (kind) => {
     const k = SWIPE_KINDS[kind];
     return `<div data-stamp="${kind}" class="pointer-events-none absolute inset-0 z-[3] grid place-items-center rounded-2xl opacity-0" style="background:${k.color}38;box-shadow:inset 0 0 0 4px ${k.color}">
@@ -1203,6 +1320,7 @@ function renderSwipe() {
       <div class="w-14"></div>
     </div>`;
   bindSwipeCard($('#swipeCard'));
+  preloadSwipe(queue.slice(1, 5));
   hydrate(el);
 }
 
@@ -1274,23 +1392,29 @@ function swipeDecide(choice) {
     card.style.transform = `translate(${right ? '' : '-'}130vw, 40px) rotate(${right ? 30 : -30}deg)`;
   }
   navigator.vibrate?.(10);
+  const gen = swipe.gen, e = swipe.queue[0];
   setTimeout(() => {
-    lightButton(choice, 0);
-    const e = swipe.queue.shift();
-    const status = SWIPE_STATUS[choice];
-    if (status) {
-      const rec = addFromView(e, status);
-      rec.finishedAt = null; // datum onbekend: telt niet mee als "uitgespeeld in <jaar>"
-      saveGames();
-      swipe.history.push({ e, choice, id: rec.id });
-      swipe[choice === 'yes' ? 'yes' : 'part']++;
-    } else {
-      swipedNo.add(e.key); saveSwipedNo();
-      swipe.history.push({ e, choice });
-      swipe.no++;
+    // Intussen een andere stapel gestart of het scherm gesloten en opnieuw begonnen: niks doen
+    if (swipe.gen !== gen || swipe.queue[0] !== e) return;
+    try {
+      lightButton(choice, 0);
+      swipe.queue.shift();
+      const status = SWIPE_STATUS[choice];
+      if (status) {
+        const rec = addFromView(e, status);
+        rec.finishedAt = null; // datum onbekend: telt niet mee als "uitgespeeld in <jaar>"
+        saveGames();
+        swipe.history.push({ e, choice, id: rec.id });
+        swipe[choice === 'yes' ? 'yes' : 'part']++;
+      } else {
+        swipedNo.add(e.key); saveSwipedNo();
+        swipe.history.push({ e, choice });
+        swipe.no++;
+      }
+    } finally {
+      swipe.busy = false; // ook bij een fout: anders reageert geen kaartje meer
+      renderSwipe();
     }
-    swipe.busy = false;
-    renderSwipe();
   }, 320);
 }
 
@@ -1305,8 +1429,8 @@ function showSwiped(choice) {
 }
 
 function swipeUndo() {
+  if (swipe.busy || !swipe.history.length) return; // eerst checken, dan pas uit de geschiedenis halen
   const h = swipe.history.pop();
-  if (!h || swipe.busy) return;
   if (h.id) { games = games.filter(g => g.id !== h.id); saveGames(); swipe[h.choice === 'yes' ? 'yes' : 'part']--; }
   else { swipedNo.delete(h.e.key); saveSwipedNo(); swipe.no--; }
   swipe.queue.unshift(h.e);
@@ -1314,7 +1438,7 @@ function swipeUndo() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if ($('#swipeScreen').hidden || !swipe.set || e.target.closest('input, textarea, select')) return;
+  if ($('#swipeScreen').hidden || !swipe.set || e.target.closest?.('input, textarea, select')) return;
   if (e.key === 'ArrowRight') swipeDecide('yes');
   else if (e.key === 'ArrowLeft') swipeDecide('no');
   else if (e.key === 'ArrowUp') { e.preventDefault(); swipeDecide('up'); }
@@ -1674,7 +1798,7 @@ function renderDetail() {
 
   const cd = countdown(g.release);
   const trailer = g.trailer || g.youtube || info?.youtube;
-  const platforms = [...new Set([...(g.platforms || []).map(shortPlatform)])];
+  const platforms = orderPlatforms(g.platforms, g.year); // eerste = oorspronkelijk platform
   const mine_ = myPlats(g);
   const genres = info?.genres?.length ? info.genres : g.genres || [];
 
@@ -1821,7 +1945,8 @@ function renderDetail() {
 function addFromView(g, status) {
   const sorted = (g.platforms || []).map(p => (typeof p === 'string' ? { name: p } : p));
   const platforms = [...new Set(sorted.map(shortPlatform))];
-  const myPlatform = platforms.find(p => NINTENDO_RE.test(p)) || platforms[0] || null;
+  const ordered = orderPlatforms(platforms, g.year || Number(String(g.release || '').slice(0, 4)) || null);
+  const myPlatform = ordered.find(p => NINTENDO_RE.test(p)) || ordered[0] || null;
   const myPlatforms = myPlatform ? [myPlatform] : [];
   const rec = {
     id: uid(),
@@ -2206,8 +2331,8 @@ document.addEventListener('click', (e) => {
   if (close) { hideScreen(close.closest('section'), { after: render }); return; }
   const heroBtn = e.target.closest('[data-hero]');
   if (heroBtn) {
-    if (prefs.heroId === heroBtn.dataset.hero || heroGame(games.filter(g => g.status === 'playing'))?.id === heroBtn.dataset.hero) openDetail(heroBtn.dataset.hero);
-    else { prefs.heroId = heroBtn.dataset.hero; savePrefs(); renderHome(); homeEl.scrollTo({ top: 0, behavior: 'smooth' }); }
+    if (longPressed) { longPressed = false; return; } // klik ná lang indrukken niet ook als tik tellen
+    openDetail(heroBtn.dataset.hero);
     return;
   }
   const open = e.target.closest('[data-open]');

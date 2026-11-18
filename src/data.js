@@ -308,7 +308,10 @@ export function franchiseCover(name) {
 export function upcoming(limit = 20, { notable = true } = {}) {
   if (!entries) return [];
   const all = entries.filter(e => isFuture(e.release)).sort((a, b) => String(a.release).localeCompare(String(b.release)));
-  const known = all.filter(e => e.pop >= 3 || e.franchise);
+  // Bekend: uit een van de grote (vaste) Nintendo-franchises, of veel belangstelling op IGDB.
+  // (Eerst was elke game met een serie of een beetje hype genoeg; dan stonden er vooral onbekende games.)
+  const curated = new Set(CURATED_FRANCHISES.map(f => f.name));
+  const known = all.filter(e => curated.has(e.franchise) || e.pop >= 20);
   return (notable && known.length >= 5 ? known : all).slice(0, limit);
 }
 

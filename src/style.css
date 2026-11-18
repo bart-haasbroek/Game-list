@@ -44,7 +44,9 @@
 /* Scherm staat stil: geen animatie en schaduw meer (anders wazige tekst op iOS, zie showScreen) */
 section.settled { animation: none; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { .modal, .modal.modal-out { animation-duration: .01s; } }
-.view-in { animation: fade 0.18s ease-out; }
+/* Tabwissel: zacht, niet vanaf onzichtbaar (dat voelde als flikkeren) */
+.view-in { animation: view-in 0.16s ease-out; }
+@keyframes view-in { from { opacity: .55; } }
 
 /* Safe areas (notch / home-indicator) */
 @utility pt-safe { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); }
@@ -215,3 +217,11 @@ section.settled { animation: none; box-shadow: none; }
 .status-btn:active:not(:disabled) { transform: scale(.96); }
 .status-btn.is-on { background: color-mix(in srgb, var(--c) 18%, var(--color-surface)); color: var(--color-ink); box-shadow: inset 0 0 0 2px var(--c); }
 .status-btn:disabled { opacity: .3; }
+
+/* Aan het spelen: lang indrukken = hoofdgame. Geen iOS-menu of tekstselectie, kaartje krimpt tijdens het indrukken */
+.play-card { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: transform .45s cubic-bezier(.2, .8, .2, 1), background-color .15s; }
+.play-card img { -webkit-user-drag: none; pointer-events: none; }
+.play-card.is-pressing { transform: scale(.93); }
+
+/* Meer is een kolom die zelf scrolt: zonder dit kromp het menu bovenaan tot een leeg balkje */
+#moreView > * { flex-shrink: 0; }

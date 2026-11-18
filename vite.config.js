@@ -2,6 +2,10 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Covers-cache begrenzen: langst niet gebruikte eruit boven 2500 plaatjes, en meteen opruimen als de opslag vol raakt
+// (anders groeit hij onbeperkt en kan iOS de opslag van de app wissen)
+const COVER_EXPIRY = { maxEntries: 2500, purgeOnQuotaError: true }; // geen leeftijdsgrens: covers van eigen games moeten offline blijven
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -36,20 +40,20 @@ export default defineConfig({
             // Gecomprimeerde covers via Netlify Image CDN (alles wat je bekeken hebt blijft offline)
             urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/.netlify/images'),
             handler: 'CacheFirst',
-            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] } },
+            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] }, expiration: COVER_EXPIRY },
           },
           {
             // Grote IGDB-covers van je eigen games: offline beschikbaar
             urlPattern: ({ url }) => url.hostname === 'images.igdb.com' && /t_cover_big|t_1080p/.test(url.pathname),
             handler: 'CacheFirst',
-            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] } },
+            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] }, expiration: COVER_EXPIRY },
           },
           {
             // Handmatige cover-URL's van andere sites
             urlPattern: ({ url, request }) =>
               request.destination === 'image' && url.origin !== self.location.origin && url.hostname !== 'images.igdb.com',
             handler: 'CacheFirst',
-            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] } },
+            options: { cacheName: 'covers-v2', cacheableResponse: { statuses: [0, 200] }, expiration: COVER_EXPIRY },
           },
         ],
       },
