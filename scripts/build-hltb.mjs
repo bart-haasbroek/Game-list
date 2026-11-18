@@ -5,6 +5,8 @@
 //                                     anders schrijft het public/data/hltb.json
 //           yarn hltb --write-file -> schrijft (ook) public/data/hltb.json (de reservekopie in de app)
 //           yarn hltb --limit 50   -> alleen de 50 populairste (om te testen)
+//           yarn hltb --match "mario|zelda" -> alleen games waarvan titel of franchise hierop past (regex)
+//           Een gedeeltelijke run (--limit/--match) vult de bestaande data aan in plaats van die te vervangen.
 //
 // Eén keer per maand via .github/workflows/update-hltb.yml. Duurt een paar uur: rustig aan (1 zoekopdracht
 // per seconde) zodat HLTB er geen last van heeft.
@@ -24,6 +26,9 @@ const upload = Boolean(NETLIFY_AUTH_TOKEN && NETLIFY_SITE_ID);
 const writeFileToo = process.argv.includes('--write-file') || !upload;
 const limitArg = process.argv.indexOf('--limit');
 const limit = limitArg > 0 ? Number(process.argv[limitArg + 1]) : Infinity;
+const matchArg = process.argv.indexOf('--match');
+const match = matchArg > 0 ? new RegExp(process.argv[matchArg + 1], 'i') : null;
+const partial = Boolean(match) || limit !== Infinity;
 
 if (process.env.CI && !upload) {
   console.error('NETLIFY_AUTH_TOKEN / NETLIFY_SITE_ID ontbreken: kan de data niet uploaden.');
@@ -37,7 +42,8 @@ const data = store ? await store.get('games', { type: 'json' }) : JSON.parse(awa
 if (!data?.games?.length) { console.error('Geen gamedatabase gevonden; draai eerst yarn data.'); process.exit(1); }
 const today = new Date().toISOString().slice(0, 10);
 const wanted = data.games
-  .filter(g => g[2] && String(g[2]) <= today && g[7] >= MIN_POP)
+  .filter(g => g[2] && String(g[2]) <= today && (match || g[7] >= MIN_POP)) // met --match ook de minder bekende
+  .filter(g => !match || match.test(g[1]) || match.test(data.franchises[g[5]] || ''))
   .sort((a, b) => b[7] - a[7])
   .slice(0, limit);
 
@@ -48,7 +54,10 @@ const prev = prevText ? JSON.parse(prevText).games || {} : {};
 // ---------- 2. Zoeken ----------
 console.log(`HowLongToBeat: ${wanted.length} games (populariteit >= ${MIN_POP}), ±${Math.round(wanted.length * DELAY / 60000)} min`);
 const started = Date.now();
-const games = {};
+// Gedeeltelijke run: alles wat al bekend was blijft staan, alleen de gezochte games worden vernieuwd
+// Games die niet (meer) in de database staan (bv. weggefilterde fangames/homebrew) vallen weg
+const known = new Set(data.games.map(g => String(g[0])));
+const games = partial ? Object.fromEntries(Object.entries(prev).filter(([id]) => known.has(id))) : {};
 let found = 0, errors = 0;
 for (const [i, g] of wanted.entries()) {
   const [id, title, release] = g;
@@ -58,6 +67,7 @@ for (const [i, g] of wanted.entries()) {
     const alt = !m && altTitle(title);
     if (alt) { await sleep(DELAY); m = pickMatch(await hltbSearch(alt), alt, null); }
     if (m && (m.comp_main || m.comp_plus || m.comp_100)) { games[id] = hltbRow(m); found++; }
+    else delete games[id];
   } catch (e) {
     errors++;
     if (prev[id]) games[id] = prev[id];
@@ -78,7 +88,7 @@ const out = {
 const text = JSON.stringify(out);
 if (upload) {
   const before = Object.keys(prev).length;
-  if (limit === Infinity && before && Object.keys(games).length < before * 0.8 && !process.argv.includes('--force')) {
+  if (!partial && before && Object.keys(games).length < before * 0.8 && !process.argv.includes('--force')) {
     console.error(`Gestopt: ${Object.keys(games).length} is veel minder dan de vorige keer (${before}). Oude data blijft staan.`);
     process.exit(1);
   }
