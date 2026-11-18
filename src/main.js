@@ -171,12 +171,19 @@ const label = (t) => `<div class="mb-2 text-xs font-bold uppercase tracking-wide
 const sectionHead = (t, action = '') => `<div class="mb-2 mt-6 flex items-center justify-between"><div class="text-xs font-bold uppercase tracking-wider text-muted">${t}</div>${action}</div>`;
 
 let toastTimer;
+// Melding onderaan; blijft langer staan bij langere tekst. Nieuwe melding vervangt de vorige (opnieuw inschuiven).
 function toast(msg) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.innerHTML = `<span class="size-2 flex-none rounded-full bg-accent"></span><span>${esc(msg)}</span>`;
   t.hidden = false;
+  t.classList.remove('is-in', 'is-out');
+  void t.offsetWidth; // animatie opnieuw starten
+  t.classList.add('is-in');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 1800);
+  toastTimer = setTimeout(() => {
+    t.classList.replace('is-in', 'is-out');
+    toastTimer = setTimeout(() => { t.hidden = true; t.classList.remove('is-out'); }, 220);
+  }, Math.min(4500, 1800 + msg.length * 35));
 }
 
 // ---------- Covers ----------
@@ -554,17 +561,12 @@ function heroHTML(g) {
       </div>
     </div>`;
   }
-  const pt = hltbFor(g.igdbId);
-  const hours = pt && (pt.main || pt.plus || pt.complete);
-  const genre = (g.info?.genres?.length ? g.info.genres : g.genres || [])[0];
-  const line = [genre, platLabel(g)].filter(Boolean).join(' · ');
   // Lange titels: editie ("- Nintendo Switch 2 Edition") op een eigen, kleinere regel; lettergrootte naar lengte
   const m = g.title.match(/^(.{8,}?)\s+[-–—]\s+(.+)$/);
   const [main, edition] = m ? [m[1], m[2]] : [g.title, ''];
   const size = main.length > 44 ? 'text-[24px]' : main.length > 30 ? 'text-[27px]' : 'text-[30px]';
-  // Onderregel: bij spelen de speelduur, bij een uitgespeelde game de datum en je cijfer
-  const sub = g.status === 'playing' ? (hours ? `~${fmtHours(hours)} om uit te spelen` : '')
-    : [g.finishedAt ? `Uitgespeeld op ${formatRelease(g.finishedAt)}` : '', g.rating != null ? `★ ${g.rating}/10` : ''].filter(Boolean).join(' · ');
+  // Rustig houden: alleen de titel, en bij een uitgespeelde game wanneer
+  const sub = DONE.includes(g.status) && g.finishedAt ? `Uitgespeeld op ${formatRelease(g.finishedAt)}` : '';
   const art = g.artwork ? heroImgUrl(g.artwork) : null;
   const cover = coverSrc(g);
   const bg = art || (cover ? imgUrl(cover) : null);
@@ -575,11 +577,9 @@ function heroHTML(g) {
     ${title}
     ${art ? '' : cover ? `<div class="absolute left-1/2 top-[44%] z-[1] w-[34%] max-w-[170px] -translate-x-1/2 -translate-y-1/2">${coverHTML(g, { cls: 'shadow-2xl! shadow-black/60!', placeholder: false })}</div>` : ''}
     <button data-open="${g.id}" class="absolute inset-x-0 bottom-0 z-[2] px-4 pb-5 pr-20 text-left">
-      ${g.status !== 'playing' ? `<div class="mb-1.5 inline-flex items-center gap-1 rounded-full bg-black/35 px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider backdrop-blur-md [&_svg]:size-3.5" style="color:${LIST_COLORS[g.status] || '#4fd18b'}">${ICONS[g.status] || ''}${g.finishedAt ? 'Laatst uitgespeeld' : listById[g.status]?.label || ''}</div>` : ''}
       <div class="line-clamp-3 ${size} font-black leading-[1.05] tracking-tight [text-shadow:0_2px_16px_rgba(0,0,0,.6)]">${esc(main)}</div>
       ${edition ? `<div class="mt-1 text-[16px] font-bold text-white/90 [text-shadow:0_1px_8px_rgba(0,0,0,.6)]">${esc(edition)}</div>` : ''}
-      ${line ? `<div class="mt-2 text-[15px] font-medium text-white/85">${esc(line)}</div>` : ''}
-      ${sub ? `<div class="text-[14px] text-white/65">${esc(sub)}</div>` : ''}
+      ${sub ? `<div class="mt-2 text-[14px] font-medium text-white/75 [text-shadow:0_1px_8px_rgba(0,0,0,.6)]">${esc(sub)}</div>` : ''}
     </button>
     <button data-open="${g.id}" aria-label="Info" class="absolute bottom-6 right-4 z-[3] grid size-12 place-items-center rounded-full border border-white/35 bg-black/25 backdrop-blur-md">
       ${svg('<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>')}
@@ -736,8 +736,15 @@ let franchiseArt;
 try { franchiseArt = JSON.parse(localStorage.getItem(FR_ART_KEY)) || {}; } catch { franchiseArt = {}; }
 const frArtTried = new Set();
 
-function franchiseArtHTML(e) {
-  const art = e.igdbId && franchiseArt[e.igdbId];
+// Vaste afbeelding voor franchises waar de automatische keuze een rare uitsnede gaf (IGDB-image-id)
+const FRANCHISE_ART = {
+  Mario: 'ar47uf',   // Super Mario Galaxy: Mario helemaal in beeld
+  'Pokémon': 'ar6co', // Pokémon Shield: key art met trainers en Pokémon
+};
+const igdbImg = (id) => `https://images.igdb.com/igdb/image/upload/t_1080p/${id}.jpg`;
+
+function franchiseArtHTML(e, name = null) {
+  const art = (name && FRANCHISE_ART[name] && igdbImg(FRANCHISE_ART[name])) || (e.igdbId && franchiseArt[e.igdbId]);
   if (!art) {
     return `<div data-fr-art="${e.igdbId || ''}" class="absolute inset-0 opacity-60 [&>div]:aspect-auto! [&>div]:size-full [&>div]:rounded-none! [&>div]:shadow-none!">${coverHTML(e, { placeholder: false })}</div>`;
   }
@@ -773,7 +780,7 @@ function discoverHomeHTML() {
   const tile = (f) => {
     const e = franchiseCover(f.name);
     return `<button data-franchise="${esc(f.name)}" class="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface text-left active:scale-[.97]">
-      ${e ? franchiseArtHTML(e) : ''}
+      ${e ? franchiseArtHTML(e, f.name) : ''}
       <div class="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent"></div>
       <div class="absolute inset-x-0 bottom-0 p-2.5">
         <div class="flex items-center gap-1.5 font-bold leading-tight [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-accent">${ICONS.folder}<span class="truncate">${esc(f.name)}</span></div>
@@ -1029,7 +1036,7 @@ function renderSwipePicker() {
   const tile = ({ name, left }) => {
     const cover = name === SWIPE_TOP ? popularGames(1)[0] : franchiseCover(name);
     return `<button data-swipe-pick="${esc(name)}" class="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface text-left active:scale-[.97]">
-      ${cover ? franchiseArtHTML(cover) : ''}
+      ${cover ? franchiseArtHTML(cover, name) : ''}
       <div class="absolute inset-0 bg-linear-to-t from-black/90 via-black/30 to-transparent"></div>
       <div class="absolute inset-x-0 bottom-0 p-2.5"><b class="block truncate text-[16px] leading-tight">${esc(swipeName(name))}</b>
         <span class="text-[12px] text-white/70">nog ${left}</span></div></button>`;

@@ -44,6 +44,14 @@
 /* Detail- en mappagina's: de tabbalk blijft eroverheen zichtbaar, dus onderaan ruimte vrijlaten */
 @utility pb-under-tabs { padding-bottom: calc(62px + 24px + env(safe-area-inset-bottom, 0px)); }
 @utility bottom-fab { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
+
+/* Melding (toast): net boven de tabbalk, schuift omhoog in beeld en zakt weer weg */
+.toast { left: 50%; bottom: calc(62px + 12px + env(safe-area-inset-bottom, 0px)); translate: -50% 0; }
+.toast.is-in { animation: toast-in .38s cubic-bezier(.2, .9, .25, 1.15) both; }
+.toast.is-out { animation: toast-out .22s ease-in both; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(24px) scale(.94); } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(16px) scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .toast.is-in, .toast.is-out { animation-duration: .01s; } }
 @utility pb-grid { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 /* Notities (Tiptap) */
 .notes-editor { outline: none; min-height: 140px; padding: 12px 14px; font-size: 16px; line-height: 1.5; user-select: text; -webkit-user-select: text; }
@@ -119,6 +127,8 @@
 @media (min-width: 1024px) {
   :root { --side: 240px; --gutter: 32px; }
   body > .flex { padding-left: var(--side); }
+  /* Melding midden in het inhoudsdeel, onderaan (tabs staan dan links) */
+  .toast { left: calc(50% + var(--side) / 2); bottom: 28px; }
   /* Detail- en mappagina's naast de zijbalk, zodat de tabs zichtbaar blijven */
   .sub-screen { left: var(--side); }
   .sub-screen .pb-under-tabs { padding-bottom: 48px; }
