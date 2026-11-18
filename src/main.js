@@ -647,11 +647,13 @@ function renderHome() {
   const playing = games.filter(g => g.status === 'playing')
     .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
   const top = games.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating).slice(0, 10);
-  // Laatst uitgespeeld eerst; zonder datum (bv. via swipen) daarna, de hoogst gewaardeerde voorop
-  const lastFinished = games.filter(g => DONE.includes(g.status)).sort((a, b) =>
-    String(b.finishedAt || '').localeCompare(String(a.finishedAt || '')) || (b.rating ?? -1) - (a.rating ?? -1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, 10);
-  // Kop: wat je nu speelt, en anders je laatst uitgespeelde game
-  const hero = heroGame(playing) || lastFinished[0] || null;
+  // "Laatst uitgespeeld": alleen games met een uitspeeldatum. Games zonder datum (bv. in één keer via
+  // swipen toegevoegd) zijn niet 'laatst' uitgespeeld; die staan gewoon in Bibliotheek > Uitgespeeld.
+  const done = games.filter(g => DONE.includes(g.status));
+  const lastFinished = done.filter(g => g.finishedAt).sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt))).slice(0, 10);
+  // Kop: wat je nu speelt, anders je laatst uitgespeelde game, anders je best beoordeelde uitgespeelde game
+  const bestDone = done.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating)[0];
+  const hero = heroGame(playing) || lastFinished[0] || bestDone || null;
   const nintendoUpcoming = upcoming(30).filter(e => !ownedBy(e.key)).slice(0, 15);
 
   // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
