@@ -48,6 +48,8 @@ const LISTS = [
 const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', interested: '#f5b84a', stopped: '#b5776b' };
 const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'interested', 'stopped'];
 const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
+// Lijsten die alleen kunnen als de game al uit is
+const NEEDS_RELEASE = ['playing', 'finished', 'stopped'];
 const TABS = [
   { id: 'home', label: 'Home' },
   { id: 'library', label: 'Bibliotheek' },
@@ -1024,21 +1026,41 @@ async function loadDetails() {
 
 // Critici-score (0–100, kleur zoals Metacritic) en speeltijd volgens spelers
 const fmtHours = (h) => (h >= 10 ? Math.round(h) : String(Math.round(h * 2) / 2).replace('.', ',')) + ' u';
-function scoresHTML(critic, playtime) {
-  const tiles = [];
+function scoresHTML(critic, playtime, title) {
+  let html = '';
+  // Speelduur zoals HowLongToBeat: Main Story / Main + Extras / Completionist, met balkjes
+  const rows = [['hastily', 'Main Story', 'alleen het hoofdverhaal'], ['normally', 'Main + Extras', 'verhaal plus zijmissies'], ['completely', 'Completionist', 'alles 100% uitspelen']]
+    .filter(([k]) => playtime?.[k]);
+  const hltb = `https://howlongtobeat.com/?q=${encodeURIComponent(title)}`;
+  const link = `<a href="${hltb}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[13px] font-semibold text-accent">HowLongToBeat
+    ${svg('<path d="M7 17 17 7M8 7h9v9"/>', 'size-3.5! stroke-[2.5]!')}</a>`;
+  if (rows.length) {
+    const max = Math.max(...rows.map(([k]) => playtime[k]));
+    html += `<div class="mt-6">
+      <div class="mb-2 flex items-baseline justify-between">${label('Hoe lang duurt het?').replace('mb-2', 'mb-0')}${link}</div>
+      <div class="flex flex-col gap-3.5 rounded-2xl bg-surface p-3.5">
+        ${rows.map(([k, t, sub]) => `<div>
+          <div class="mb-1.5 flex items-baseline justify-between gap-2">
+            <span><b class="text-[15px]">${t}</b> <span class="text-[12px] text-muted">${sub}</span></span>
+            <b class="flex-none text-[17px]">${fmtHours(playtime[k])}</b>
+          </div>
+          <div class="h-2 overflow-hidden rounded-full bg-surface-2"><div class="h-full rounded-full bg-accent" style="width:${Math.max(6, Math.round(playtime[k] / max * 100))}%"></div></div>
+        </div>`).join('')}
+      </div>
+      <p class="mt-1.5 text-[11px] text-muted">Gemiddelde speeltijd volgens spelers (IGDB). Precieze cijfers per speelstijl op HowLongToBeat.</p>
+    </div>`;
+  } else {
+    html += `<div class="mt-6 flex items-center justify-between rounded-2xl bg-surface p-3.5">
+      <span class="text-[13px] text-muted">Speelduur nog onbekend</span>${link}</div>`;
+  }
   if (critic) {
     const c = critic.score >= 75 ? '#4fd18b' : critic.score >= 50 ? '#f5b84a' : '#ff5c5c';
-    tiles.push(`<div class="flex-1 rounded-xl p-2.5 text-center" style="background:color-mix(in srgb,${c} 16%,var(--color-surface,#191c23))">
-      <b class="block text-[22px] leading-tight" style="color:${c}">${critic.score}</b>
-      <span class="text-[11px] text-muted">Critici${critic.count ? ` · ${critic.count}` : ''}</span></div>`);
+    html += `<div class="mt-2.5 flex items-center gap-3 rounded-2xl bg-surface p-3">
+      <div class="grid size-12 flex-none place-items-center rounded-xl text-[22px] font-extrabold" style="background:${c};color:#0f1115">${critic.score}</div>
+      <div><b class="block">Critici-score</b><span class="text-[12px] text-muted">${critic.count > 1 ? `gemiddelde van ${critic.count} recensies` : critic.count === 1 ? 'op basis van 1 recensie' : 'uit recensies'} · IGDB</span></div>
+    </div>`;
   }
-  for (const [k, t] of [['hastily', 'Verhaal'], ['normally', "+ Extra's"], ['completely', '100%']]) {
-    if (playtime?.[k]) tiles.push(`<div class="flex-1 rounded-xl bg-surface p-2.5 text-center">
-      <b class="block text-[22px] leading-tight">${fmtHours(playtime[k])}</b><span class="text-[11px] text-muted">${t}</span></div>`);
-  }
-  if (!tiles.length) return '';
-  return `<div class="mt-6">${label(playtime ? 'Speeltijd & recensies' : 'Recensies')}<div class="flex gap-1.5">${tiles.join('')}</div>
-    ${playtime ? '<p class="mt-1.5 text-[11px] text-muted">Speeltijd volgens spelers, via IGDB</p>' : ''}</div>`;
+  return html;
 }
 
 function renderDetail() {
@@ -1055,7 +1077,12 @@ function renderDetail() {
   const platforms = [...new Set([...(g.platforms || []).map(shortPlatform)])];
   const genres = info?.genres?.length ? info.genres : g.genres || [];
 
-  const statusBtns = LISTS.map(l => `<button data-status="${l.id}" class="flex flex-col items-center gap-1 rounded-xl px-0.5 py-2.5 text-[10.5px] font-semibold ${owned && g.status === l.id ? 'bg-accent text-white' : 'bg-surface text-muted'}">${ICONS[l.id]}${l.short}</button>`).join('');
+  // Nog niet uit: spelen, uitspelen of ermee stoppen kan nog niet
+  const notOut = isFuture(g.release);
+  const statusBtns = LISTS.map(l => {
+    const off = notOut && NEEDS_RELEASE.includes(l.id) && g.status !== l.id;
+    return `<button data-status="${l.id}" ${off ? 'disabled' : ''} class="flex flex-col items-center gap-1 rounded-xl px-0.5 py-2.5 text-[10.5px] font-semibold disabled:opacity-35 ${owned && g.status === l.id ? 'bg-accent text-white' : 'bg-surface text-muted'}">${ICONS[l.id]}${l.short}</button>`;
+  }).join('');
 
   const ratingBtns = Array.from({ length: 11 }, (_, i) => {
     const on = g.rating != null && i <= g.rating;
@@ -1099,11 +1126,12 @@ function renderDetail() {
         : `<a href="${ytSearch}" target="_blank" rel="noopener" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold [&_svg]:size-4">${ICONS.play}Zoek trailer op YouTube</a>`}
     </div>
 
-    ${scoresHTML(critic, playtime)}
+    ${cd ? '' : scoresHTML(critic, playtime, g.title)}
 
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
       <div class="grid grid-cols-3 gap-1.5">${statusBtns}</div>
+      ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
     ${owned ? `
@@ -1204,6 +1232,7 @@ $('#detailBody').addEventListener('click', async (e) => {
   const s = e.target.closest('[data-status]');
   if (s) {
     const status = s.dataset.status;
+    if (isFuture(g.release) && NEEDS_RELEASE.includes(status)) { toast('Deze game is nog niet uit'); return; }
     if (!owned) {
       const rec = addFromView(g, status);
       currentRef = rec.id;
@@ -1315,6 +1344,7 @@ function saveManual() {
   if (!title) { f.title.focus(); return; }
   const status = f.status.value;
   const release = f.release.value || null;
+  if (isFuture(release) && NEEDS_RELEASE.includes(status)) { toast('Deze game is nog niet uit: kies Wishlist of Interessant'); return; }
   const rec = addFromView({
     key: 'manual:' + uid(), source: 'manual', title,
     cover: f.cover.value.trim() || null, release, year: release ? Number(release.slice(0, 4)) : null,
