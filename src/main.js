@@ -1216,14 +1216,25 @@ function openDetail(ref) {
   loadDetails();
 }
 
-async function loadDetails() {
-  const v = viewOf(currentRef);
+// Details die nu geladen worden, per game (zodat 'Trailer opzoeken' erop kan wachten)
+const detailsLoading = new Map();
+const detailsFetchable = (g) => online() && Boolean(g.igdbId || g.qid || g.wikiTitle || g.summary);
+
+function loadDetails() {
+  const ref = currentRef;
+  if (detailsLoading.has(ref)) return detailsLoading.get(ref);
+  const p = fetchDetailsFor(ref).finally(() => detailsLoading.delete(ref));
+  detailsLoading.set(ref, p);
+  return p;
+}
+
+async function fetchDetailsFor(ref) {
+  const v = viewOf(ref);
   if (!v || !online()) return;
   const { g, owned } = v;
   const have = owned ? g.info : detailsCache.get(g.key);
   if (have) return;
-  if (!g.igdbId && !g.qid && !g.wikiTitle && !g.summary) return;
-  const ref = currentRef;
+  if (!detailsFetchable(g)) return;
   try {
     const info = await fetchDetails(g);
     info.fetchedAt = Date.now();
@@ -1337,7 +1348,10 @@ function renderDetail() {
     </div>` : ''}
 
     <div class="mt-5 flex gap-2">
-      ${trailer ? `<button data-trailer="${esc(trailer)}" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ink p-3 font-bold text-bg [&_svg]:size-4">${ICONS.play}Trailer</button>`
+ ${trailer ? `<button data-trailer="${esc(trailer)}" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ink p-3 font-bold text-bg [&_svg]:size-4">${ICONS.play}Trailer</button>`
+        : !(owned ? g.info : detailsCache.get(g.key)) && detailsFetchable(g)
+        // Gegevens (met de trailer) komen nog binnen: knop wacht daarop en speelt de trailer in de app af
+        ? `<button data-trailer-wait class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ink p-3 font-bold text-bg disabled:opacity-80 [&_svg]:size-4">${ICONS.play}<span>Trailer opzoeken</span></button>`
         : `<a href="${ytSearch}" target="_blank" rel="noopener" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold [&_svg]:size-4">${ICONS.play}Zoek trailer op YouTube</a>`}
     </div>
 
@@ -1485,6 +1499,8 @@ $('#detailBody').addEventListener('click', async (e) => {
   }
   const t = e.target.closest('[data-trailer]');
   if (t) { openTrailer(t.dataset.trailer); return; }
+  const wait = e.target.closest('[data-trailer-wait]');
+  if (wait) { waitForTrailer(wait); return; }
   const f = e.target.closest('[data-franchise]');
   if (f) openFranchise(f.dataset.franchise);
 });
@@ -1529,6 +1545,23 @@ $('#deleteBtn').addEventListener('click', async () => {
 });
 
 // ---------- Trailer-popup ----------
+// 'Trailer opzoeken': wachten tot de gegevens binnen zijn, dan de trailer in de app afspelen
+async function waitForTrailer(btn) {
+  const ref = currentRef;
+  btn.disabled = true;
+  btn.querySelector('span').textContent = 'Trailer zoeken…';
+  btn.querySelector('svg')?.classList.add('animate-pulse');
+  await loadDetails();
+  if (currentRef !== ref || $('#detailScreen').hidden) return;
+  const v = viewOf(ref);
+  const g = v?.g;
+  const info = v?.owned ? g?.info : detailsCache.get(g?.key);
+  const yt = g && (g.trailer || g.youtube || info?.youtube);
+  renderDetail();
+  if (yt) openTrailer(yt);
+  else toast('Geen trailer gevonden in de database');
+}
+
 function openTrailer(id) {
   $('#trailerFrame').innerHTML = `<iframe class="size-full" src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0&playsinline=1&modestbranding=1"
     title="Trailer" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
