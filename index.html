@@ -109,7 +109,7 @@
   </section>
 
   <!-- Swipen: wat heb ik gespeeld? -->
-  <section id="swipeScreen" class="fixed inset-0 z-[11] flex animate-slide-up flex-col bg-bg" hidden>
+  <section id="swipeScreen" class="fixed inset-0 z-[11] flex modal flex-col bg-bg" hidden>
     <header class="pt-safe flex flex-none items-center gap-1 px-4 pb-2.5">
       <button class="-ml-2 grid size-9 place-items-center rounded-full active:bg-surface-2" id="swipeBack" aria-label="Terug">
         <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
@@ -124,8 +124,11 @@
   </section>
 
   <!-- Handmatig -->
+  <!-- Dimt de app achter een modal (notities, swipen, handmatig toevoegen) -->
+  <div id="modalBackdrop" class="fixed inset-0 bg-black opacity-0 transition-opacity duration-300" hidden></div>
+
   <!-- Notities: schermvullend lezen en bewerken -->
-  <section id="notesScreen" class="fixed inset-0 z-30 flex animate-slide-up flex-col bg-bg" hidden>
+  <section id="notesScreen" class="fixed inset-0 z-30 flex modal flex-col bg-bg" hidden>
     <header class="pt-safe flex flex-none items-center gap-3 border-b border-line px-4 pb-2.5">
       <div class="min-w-0 flex-1 pt-2"><div class="text-[11px] font-semibold uppercase tracking-wider text-muted">Notities &amp; voortgang</div><strong id="notesTitle" class="block truncate text-[17px]"></strong></div>
       <button id="notesDone" class="mt-2 rounded-full bg-accent px-4 py-1.5 font-bold text-white">Klaar</button>
@@ -133,7 +136,7 @@
     <div id="notesBody" class="pb-safe flex min-h-0 flex-1 flex-col"></div>
   </section>
 
-  <section id="manualScreen" class="fixed inset-0 z-20 flex animate-slide-up flex-col bg-bg" hidden>
+  <section id="manualScreen" class="fixed inset-0 z-20 flex modal flex-col bg-bg" hidden>
     <header class="pt-safe flex flex-none items-center justify-between px-4 pb-2.5">
       <button class="py-2 font-semibold text-muted" data-close>Annuleer</button>
       <strong>Handmatig toevoegen</strong>
