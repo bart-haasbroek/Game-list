@@ -27,6 +27,14 @@ yarn data   # duurt 5–30 minuten; Wikipedia remt het tempo af
 ```
 Daarna committen en deployen. De app neemt de lijst mee in de offline-cache.
 
+## Critici-score en speeltijd
+Het gameprofiel toont de critici-score (IGDB, gemiddelde van recensies) en de speeltijd volgens spelers
+(verhaal / + extra's / 100%). De app haalt die live op via `/api/game`; `public/data/extras.json` is de
+offline reserve en zit in de offline-cache. Bijwerken:
+```bash
+yarn extras   # ~1 minuut, met TWITCH_* in .env
+```
+
 ## Gegevensbronnen
 - **Wikidata / Wikipedia** (CC BY-SA): gamelijst, platforms, datums, franchises, omschrijvingen, covers.
 - **MyMemory**: automatische vertaling naar het Nederlands als er geen Nederlandse Wikipedia-pagina is (gratis, met daglimiet).

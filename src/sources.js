@@ -19,7 +19,7 @@ export async function searchIGDB(q, signal) {
   if (!(res.headers.get('content-type') || '').includes('application/json')) throw new SourceUnavailable('Geen IGDB-function');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new SourceUnavailable(data.error || 'IGDB-fout');
-  return (data.results || []).map(r => ({ ...r, key: 'igdb:' + r.id, source: 'igdb', sourceId: r.id }));
+  return (data.results || []).map(r => ({ ...r, key: 'igdb:' + r.id, source: 'igdb', sourceId: r.id, igdbId: r.id }));
 }
 
 // ---------- Wikipedia + Wikidata (geen sleutel nodig) ----------

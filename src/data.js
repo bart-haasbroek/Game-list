@@ -1,7 +1,7 @@
-// Offline dataset (public/data/games.json): laden, zoeken, franchises en releasedatums.
+// Gamedatabase (IGDB, via Netlify Blobs): laden, zoeken, franchises en releasedatums.
 
 // Eigen franchiselijst: volgorde = volgorde in Ontdek. `re` herkent de franchise aan de titel,
-// `alias` koppelt namen uit Wikidata aan deze franchise.
+// `alias` koppelt franchise-namen uit IGDB aan deze franchise.
 export const CURATED_FRANCHISES = [
   { name: 'Mario', re: /\bmario\b|\bluigi\b|\bpeach\b|\bbowser\b/i, alias: ['Mario', 'Super Mario', 'Mario Kart', 'Mario Party', 'Paper Mario', 'Mario & Luigi', 'Luigi', 'Mario Tennis', 'Mario Golf', 'Mario Sports'] },
   { name: 'Zelda', re: /zelda|hyrule/i, alias: ['The Legend of Zelda'] },
@@ -46,6 +46,7 @@ export const CURATED_FRANCHISES = [
   { name: 'Just Dance', re: /just dance/i, alias: ['Just Dance'] },
   { name: 'Minecraft', re: /minecraft/i, alias: ['Minecraft'] },
 ];
+const curatedNames = new Set(CURATED_FRANCHISES.map(f => f.name));
 const aliasMap = new Map(CURATED_FRANCHISES.flatMap(f => f.alias.map(a => [a.toLowerCase(), f.name])));
 
 export const normalize = (s) =>
@@ -58,64 +59,174 @@ let byFranchise = new Map();
 let meta = null;
 let loading = null;
 
+// ---------- Laden ----------
+// Bron: /api/games (Netlify Blobs, wekelijks bijgewerkt uit IGDB). Een kopie staat in Cache Storage,
+// zodat de app offline werkt en direct start; daarna kijkt de app via /api/games-meta of er nieuwe data is.
+// Reserve: /data/games.json in de app zelf (bv. met `yarn dev`, of als Blobs nog leeg is).
+const DATA_URL = '/api/games';
+const META_URL = '/api/games-meta';
+const FALLBACK_URL = '/data/games.json';
+const DATA_CACHE = 'gamedata-v1';
+const IGDB_IMG = (id) => `https://images.igdb.com/igdb/image/upload/t_cover_big_2x/${id}.jpg`;
+
+const listeners = new Set();
+export const onDatasetUpdate = (cb) => listeners.add(cb);
+
+async function getJSONResponse(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  // Zonder Netlify Functions (yarn dev) komt index.html terug in plaats van JSON
+  if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) throw new Error('Niet beschikbaar: ' + url);
+  return res;
+}
+
+async function readCache() {
+  try {
+    const res = await (await caches.open(DATA_CACHE)).match(DATA_URL);
+    const data = res ? await res.json() : null;
+    return data?.version === 3 ? data : null;
+  } catch { return null; }
+}
+
+async function writeCache(text) {
+  try { await (await caches.open(DATA_CACHE)).put(DATA_URL, new Response(text, { headers: { 'content-type': 'application/json' } })); } catch {}
+}
+
+async function download() {
+  for (const url of [DATA_URL, FALLBACK_URL]) {
+    try {
+      const text = await (await getJSONResponse(url)).text();
+      const data = JSON.parse(text);
+      if (data.version === 3) return { data, text };
+    } catch {}
+  }
+  throw new Error('Gamedatabase niet beschikbaar');
+}
+
+function apply(data) {
+  meta = { generated: data.generated, count: data.games.length, source: data.source || 'igdb' };
+  entries = data.games.map(([id, title, release, plats, cover, fr, gen, pop]) => {
+    const igdbFranchise = fr >= 0 ? data.franchises[fr] : null;
+    const curated = CURATED_FRANCHISES.find(f => f.re.test(title));
+    const franchise = curated?.name || (igdbFranchise && (aliasMap.get(igdbFranchise.toLowerCase()) || igdbFranchise)) || null;
+    return {
+      key: 'igdb:' + id,
+      source: 'igdb',
+      sourceId: id,
+      igdbId: id,
+      title,
+      release: release || null,
+      year: release ? Number(String(release).slice(0, 4)) : null,
+      platforms: plats.map(i => data.platforms[i]),
+      cover: cover ? IGDB_IMG(cover) : null,
+      coverFile: null,
+      genres: (gen || []).map(i => data.genres[i]),
+      franchise,
+      pop: pop || 0,
+      _n: normalize(title),
+    };
+  });
+  for (const e of entries) e._w = e._n.split(' ');
+  byKey = new Map(entries.map(e => [e.key, e]));
+  byFranchise = new Map();
+  for (const e of entries) if (e.franchise) (byFranchise.get(e.franchise) || byFranchise.set(e.franchise, []).get(e.franchise)).push(e);
+  for (const list of byFranchise.values()) list.sort((a, b) => String(b.release || '0').localeCompare(String(a.release || '0')));
+}
+
 export function loadDataset() {
   if (entries) return Promise.resolve(entries);
   if (loading) return loading;
-  loading = fetch('/data/games.json')
-    .then(r => { if (!r.ok) throw new Error('Dataset niet gevonden'); return r.json(); })
-    .then(data => {
-      meta = { generated: data.generated, count: data.games.length };
-      entries = data.games.map(([qid, title, release, plats, en, image, fr, nl, youtube]) => {
-        const wdFranchise = fr >= 0 ? data.franchises[fr] : null;
-        const curated = CURATED_FRANCHISES.find(f => f.re.test(title));
-        const franchise = curated?.name || (wdFranchise && (aliasMap.get(wdFranchise.toLowerCase()) || wdFranchise)) || null;
-        return {
-          key: 'wd:Q' + qid,
-          source: 'wikidata',
-          qid: 'Q' + qid,
-          title,
-          release: release || null,
-          year: release ? Number(String(release).slice(0, 4)) : null,
-          platforms: plats.map(i => data.platforms[i]),
-          wikiTitle: en === 1 ? title : en || null,
-          nlTitle: nl === 1 ? title : nl || null,
-          coverFile: image || null,
-          franchise,
-          youtube: youtube || null,
-          _n: normalize(title),
-        };
-      });
-      for (const e of entries) e._w = e._n.split(' ');
-      byKey = new Map(entries.map(e => [e.key, e]));
-      byFranchise = new Map();
-      for (const e of entries) if (e.franchise) (byFranchise.get(e.franchise) || byFranchise.set(e.franchise, []).get(e.franchise)).push(e);
-      for (const list of byFranchise.values()) list.sort((a, b) => String(b.release || '0').localeCompare(String(a.release || '0')));
-      return entries;
-    })
-    .catch(e => { loading = null; throw e; });
+  loading = (async () => {
+    let data = await readCache();
+    if (!data) {
+      const fresh = await download();
+      data = fresh.data;
+      await writeCache(fresh.text);
+    }
+    apply(data);
+    checkForUpdate().catch(() => {});
+    return entries;
+  })().catch(e => { loading = null; throw e; });
   return loading;
+}
+
+/** Kijkt of er een nieuwere database is en laadt die. Geeft true terug als er iets veranderd is. */
+export async function checkForUpdate() {
+  if (!navigator.onLine) return false;
+  const remote = await (await getJSONResponse(META_URL)).json();
+  if (remote.generated === meta?.generated) return false;
+  const text = await (await getJSONResponse(DATA_URL)).text();
+  const data = JSON.parse(text);
+  if (data.version !== 3 || data.generated === meta?.generated) return false;
+  await writeCache(text);
+  apply(data);
+  listeners.forEach(cb => cb());
+  return true;
+}
+
+/** Zoekt een game op titel (voor eigen games uit een oudere versie van de app, zonder IGDB-id). */
+export function findEntry(title, year, platforms = []) {
+  if (!entries || !title) return null;
+  const n = normalize(title);
+  const hits = entries.filter(e => e._n === n);
+  if (!hits.length) return null;
+  const score = (e) => (platforms.some(p => e.platforms.includes(p)) ? 10 : 0) - (year && e.year ? Math.abs(year - e.year) * 2 : 1) + Math.min(e.pop, 50) / 50;
+  const best = hits.sort((a, b) => score(b) - score(a))[0];
+  return year && best.year && Math.abs(year - best.year) > 2 ? null : best;
 }
 
 export const datasetInfo = () => meta;
 export const getEntry = (key) => byKey?.get(key) || null;
 
 // ---------- Zoeken ----------
+// Kleinste aantal tikfouten tussen `t` en het begin van woord `w` (Levenshtein, prefix mag eindigen waar het wil)
+function prefixDistance(t, w, max) {
+  if (w.length < t.length - max) return max + 1;
+  let prev2 = null, prev = Array.from({ length: w.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= t.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= w.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (t[i - 1] === w[j - 1] ? 0 : 1));
+      // Twee letters omgewisseld ("kriby") telt als één fout
+      if (prev2 && i > 1 && j > 1 && t[i - 1] === w[j - 2] && t[i - 2] === w[j - 1]) cur[j] = Math.min(cur[j], prev2[j - 2] + 1);
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1;
+    prev2 = prev; prev = cur;
+  }
+  return Math.min(...prev);
+}
+// Toegestane tikfouten per zoekwoord: korte woorden moeten kloppen
+const typoBudget = (t) => (t.length >= 8 ? 2 : t.length >= 4 ? 1 : 0);
+
 export function searchDataset(q, limit = 60) {
   if (!entries) return [];
   const nq = normalize(q);
   const tokens = nq.split(' ').filter(Boolean);
   if (!tokens.length) return [];
   const out = [];
+  const budgets = tokens.map(typoBudget);
   for (const e of entries) {
     const words = e._w;
-    if (!tokens.every(t => words.some(w => w.startsWith(t)))) continue;
-    let score = 0;
+    // Elk zoekwoord moet het begin van een woord in de titel zijn, met een paar tikfouten speling
+    let typos = 0, ok = true;
+    for (let i = 0; i < tokens.length && ok; i++) {
+      const t = tokens[i];
+      if (words.some(w => w.startsWith(t))) continue;
+      if (!budgets[i]) { ok = false; break; }
+      let best = budgets[i] + 1;
+      for (const w of words) { best = Math.min(best, prefixDistance(t, w, budgets[i])); if (best === 1) break; }
+      if (best > budgets[i]) ok = false; else typos += best;
+    }
+    if (!ok) continue;
+    let score = -typos * 30;
     if (e._n === nq) score += 100;
     else if (e._n.startsWith(nq)) score += 50;
     else if (e._n.includes(nq)) score += 25;
     score += tokens.filter(t => words.includes(t)).length * 5;
-    if (e.wikiTitle) score += 10;
-    if (e.coverFile) score += 5;
+    score += Math.min(e.pop, 100) / 10; // bekendere games hoger
+    if (curatedNames.has(e.franchise)) score += 8; // bekende reeksen iets hoger
+    if (e.coverFile || e.cover) score += 5;
     score -= e._n.length / 20;
     if (e.year) score += Math.max(0, e.year - 1980) / 20; // bij gelijke treffers: nieuwere games iets hoger
     out.push([score, e]);
@@ -137,14 +248,14 @@ export const franchiseGames = (name) => byFranchise.get(name) || [];
 export function franchiseCover(name) {
   // Nieuwste game met een cover als voorkant van de map
   const list = franchiseGames(name);
-  return list.find(e => e.coverFile && !isFuture(e.release)) || list.find(e => e.coverFile) || null;
+  return list.find(e => (e.coverFile || e.cover) && !isFuture(e.release)) || list.find(e => e.coverFile || e.cover) || null;
 }
 
-// Aankomende games. `notable`: alleen bekendere titels (met Wikipedia-pagina of uit een franchise)
+// Aankomende games. `notable`: alleen bekendere titels (met hype/beoordelingen in IGDB of uit een franchise)
 export function upcoming(limit = 20, { notable = true } = {}) {
   if (!entries) return [];
   const all = entries.filter(e => isFuture(e.release)).sort((a, b) => String(a.release).localeCompare(String(b.release)));
-  const known = all.filter(e => e.wikiTitle || e.franchise);
+  const known = all.filter(e => e.pop >= 3 || e.franchise);
   return (notable && known.length >= 5 ? known : all).slice(0, limit);
 }
 
