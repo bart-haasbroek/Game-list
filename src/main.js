@@ -562,6 +562,9 @@ function heroHTML(g) {
   const m = g.title.match(/^(.{8,}?)\s+[-–—]\s+(.+)$/);
   const [main, edition] = m ? [m[1], m[2]] : [g.title, ''];
   const size = main.length > 44 ? 'text-[24px]' : main.length > 30 ? 'text-[27px]' : 'text-[30px]';
+  // Onderregel: bij spelen de speelduur, bij een uitgespeelde game de datum en je cijfer
+  const sub = g.status === 'playing' ? (hours ? `~${fmtHours(hours)} om uit te spelen` : '')
+    : [g.finishedAt ? `Uitgespeeld op ${formatRelease(g.finishedAt)}` : '', g.rating != null ? `★ ${g.rating}/10` : ''].filter(Boolean).join(' · ');
   const art = g.artwork ? heroImgUrl(g.artwork) : null;
   const cover = coverSrc(g);
   const bg = art || (cover ? imgUrl(cover) : null);
@@ -572,10 +575,11 @@ function heroHTML(g) {
     ${title}
     ${art ? '' : cover ? `<div class="absolute left-1/2 top-[44%] z-[1] w-[34%] max-w-[170px] -translate-x-1/2 -translate-y-1/2">${coverHTML(g, { cls: 'shadow-2xl! shadow-black/60!', placeholder: false })}</div>` : ''}
     <button data-open="${g.id}" class="absolute inset-x-0 bottom-0 z-[2] px-4 pb-5 pr-20 text-left">
+      ${g.status !== 'playing' ? `<div class="mb-1.5 inline-flex items-center gap-1 rounded-full bg-black/35 px-2.5 py-1 text-[12px] font-bold uppercase tracking-wider backdrop-blur-md [&_svg]:size-3.5" style="color:${LIST_COLORS[g.status] || '#4fd18b'}">${ICONS[g.status] || ''}${g.finishedAt ? 'Laatst uitgespeeld' : listById[g.status]?.label || ''}</div>` : ''}
       <div class="line-clamp-3 ${size} font-black leading-[1.05] tracking-tight [text-shadow:0_2px_16px_rgba(0,0,0,.6)]">${esc(main)}</div>
       ${edition ? `<div class="mt-1 text-[16px] font-bold text-white/90 [text-shadow:0_1px_8px_rgba(0,0,0,.6)]">${esc(edition)}</div>` : ''}
       ${line ? `<div class="mt-2 text-[15px] font-medium text-white/85">${esc(line)}</div>` : ''}
-      ${hours ? `<div class="text-[14px] text-white/65">~${fmtHours(hours)} om uit te spelen</div>` : ''}
+      ${sub ? `<div class="text-[14px] text-white/65">${esc(sub)}</div>` : ''}
     </button>
     <button data-open="${g.id}" aria-label="Info" class="absolute bottom-6 right-4 z-[3] grid size-12 place-items-center rounded-full border border-white/35 bg-black/25 backdrop-blur-md">
       ${svg('<circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/>')}
@@ -619,9 +623,12 @@ function renderHome() {
 
   const playing = games.filter(g => g.status === 'playing')
     .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
-  const hero = heroGame(playing);
   const top = games.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating).slice(0, 10);
-  const lastFinished = games.filter(g => DONE.includes(g.status)).sort((a, b) => String(b.finishedAt || '').localeCompare(String(a.finishedAt || ''))).slice(0, 10);
+  // Laatst uitgespeeld eerst; zonder datum (bv. via swipen) daarna, de hoogst gewaardeerde voorop
+  const lastFinished = games.filter(g => DONE.includes(g.status)).sort((a, b) =>
+    String(b.finishedAt || '').localeCompare(String(a.finishedAt || '')) || (b.rating ?? -1) - (a.rating ?? -1) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0)).slice(0, 10);
+  // Kop: wat je nu speelt, en anders je laatst uitgespeelde game
+  const hero = heroGame(playing) || lastFinished[0] || null;
   const nintendoUpcoming = upcoming(30).filter(e => !ownedBy(e.key)).slice(0, 15);
 
   // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
