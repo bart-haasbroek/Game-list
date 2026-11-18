@@ -311,15 +311,26 @@ function syncBackdrop() {
 
 // iOS Safari houdt een geanimeerd scherm (met grote schaduw) als losse laag vast en tekent tekst
 // daarop soms wazig. Na de inschuif-animatie dus animatie en schaduw weg.
+// Alleen na het INschuiven: bij het uitschuiven (screen-out e.d.) zou 'animation: none' het scherm
+// heel even terugzetten voordat het verdwijnt (flikkeren bij de terugpijl).
+const IN_ANIMATIONS = new Set(['push-in', 'slide-up', 'modal-in']); // ook modals: anders wazige titel op iOS
 document.addEventListener('animationend', (e) => {
-  if (e.target.matches?.('section.animate-push, section.animate-slide-up')) e.target.classList.add('settled');
+  const el = e.target;
+  if (el.matches?.('section') && IN_ANIMATIONS.has(e.animationName)
+    && !el.classList.contains('screen-out') && !el.classList.contains('sheet-out') && !el.classList.contains('modal-out')) {
+    el.classList.add('settled');
+  }
 });
+
+// Strook achter de statusbalk tonen zolang er een subscherm (detail, map, swipen, notities…) open is
+const updateStatusShade = () => { $('#statusShade').hidden = !document.querySelector('body > section:not([hidden])'); };
 
 function showScreen(el) {
   el.classList.remove('screen-out', 'sheet-out', 'modal-out', 'settled');
   el.style.transform = '';
   el.style.transition = '';
   el.hidden = false;
+  updateStatusShade();
   if (el.classList.contains('modal')) { openModals.delete(el); openModals.add(el); syncBackdrop(); }
 }
 
@@ -328,10 +339,11 @@ function hideScreen(el, { animate = true, after } = {}) {
   const modal = el.classList.contains('modal');
   if (modal) { openModals.delete(el); syncBackdrop(); }
   el.classList.remove('settled'); // anders blokkeert 'animation: none' de uitschuif-animatie
-  if (!animate) { el.hidden = true; after?.(); return; }
+  if (!animate) { el.hidden = true; updateStatusShade(); after?.(); return; }
   el.classList.add(modal ? 'modal-out' : el.id === 'detailScreen' || el.id === 'folderScreen' ? 'screen-out' : 'sheet-out');
   setTimeout(() => {
     el.hidden = true;
+    updateStatusShade();
     el.classList.remove('screen-out', 'sheet-out', 'modal-out');
     after?.();
   }, modal ? 340 : 200);
@@ -1603,8 +1615,12 @@ function renderDetail() {
   }).join('')}</div>`;
 
   const ratingBtns = Array.from({ length: 11 }, (_, i) => {
-    const on = g.rating != null && i <= g.rating;
-    return `<button data-rate="${i}" class="h-[38px] rounded-[9px] text-sm font-bold ${on ? 'bg-gold text-[#1a1400]' : 'bg-surface'} ${g.rating === i ? 'ring-2 ring-white ring-inset' : ''}">${i}</button>`;
+    // Alleen het gekozen cijfer vol; de lagere licht getint (je ziet nog hoe 'vol' het is), de rest neutraal
+    const chosen = g.rating === i;
+    const below = g.rating != null && i < g.rating;
+    const cls = chosen ? 'bg-gold text-[#1a1400] scale-110 shadow-lg shadow-gold/25'
+      : below ? 'bg-gold/15 text-gold' : 'bg-surface text-muted';
+    return `<button data-rate="${i}" aria-pressed="${chosen}" class="h-[38px] rounded-[9px] text-sm font-bold transition-transform ${cls}">${i}</button>`;
   }).join('');
 
   const facts = [

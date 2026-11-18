@@ -150,6 +150,10 @@
   </section>
 
   <!-- Trailer-popup -->
+  <!-- iOS 26: effen strook achter de statusbalk zolang een subscherm open is. Zonder vast element bovenaan
+       legt Safari er een glas-/vervagingseffect overheen, waardoor de kop eronder wazig wordt. -->
+  <div id="statusShade" class="pointer-events-none fixed inset-x-0 top-0 z-[25] bg-bg" style="height:env(safe-area-inset-top, 0px)" hidden></div>
+
   <div id="trailer" class="fixed inset-0 z-50 flex animate-fade flex-col items-center justify-center bg-black/90 px-3" hidden>
     <button data-close-trailer class="pt-safe absolute right-3 top-0 grid size-11 place-items-center rounded-full text-white" aria-label="Sluiten">
       <svg viewBox="0 0 24 24" class="size-7!"><path d="M18 6 6 18M6 6l12 12"/></svg>
