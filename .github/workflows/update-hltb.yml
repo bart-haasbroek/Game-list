@@ -1,0 +1,30 @@
+# Haalt eens per maand de speeltijden op bij HowLongToBeat (voor de bekendere games) en zet ze in Netlify Blobs.
+# Duurt een paar uur, omdat het rustig aan doet (1 zoekopdracht per seconde).
+# Secrets: NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID (dezelfde als bij update-data.yml)
+name: Speeltijden bijwerken (HowLongToBeat)
+
+on:
+  schedule:
+    - cron: '0 2 3 * *' # de 3e van elke maand, 02:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: update-hltb
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - name: HowLongToBeat ophalen en uploaden naar Netlify Blobs
+        run: node scripts/build-hltb.mjs
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

@@ -8,9 +8,10 @@ import {
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
 import { loadExtras, extrasFor } from './extras.js';
+import { loadHltb, hltbFor } from './hltb.js';
 import { mountNotes, detachNotes, destroyNotes } from './notes.js';
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 const COVER_CACHE = 'covers-v2';
 
 // ---------- Iconen ----------
@@ -64,19 +65,26 @@ const TABS = [
 ];
 
 const PLATFORM_SHORT = [
-  [/switch 2/i, 'Switch 2'], [/switch/i, 'Switch'], [/wii u/i, 'Wii U'], [/^wii$/i, 'Wii'],
+  [/switch 2/i, 'Switch 2'], [/switch online|^nso$/i, 'Switch Online'], [/switch/i, 'Switch'], [/wii u/i, 'Wii U'], [/^wii$/i, 'Wii'],
   [/new nintendo 3ds/i, 'New 3DS'], [/3ds/i, '3DS'], [/nintendo dsi/i, 'DSi'], [/nintendo ds/i, 'DS'],
   [/game boy advance/i, 'GBA'], [/game boy color/i, 'GBC'], [/game boy/i, 'Game Boy'],
   [/gamecube/i, 'GameCube'], [/nintendo 64/i, 'N64'], [/super nintendo|super famicom/i, 'SNES'],
   [/nintendo entertainment|family computer/i, 'NES'], [/virtual boy/i, 'Virtual Boy'],
 ];
 const NINTENDO_RE = /nintendo|wii|game ?boy|gamecube|virtual boy|famicom|^(switch( 2)?|snes|nes|n64|gba|gbc|3ds|ds|dsi)$/i;
-const ALL_PLATFORMS = ['Switch 2', 'Switch', 'Wii U', 'Wii', '3DS', 'DS', 'GameCube', 'N64', 'SNES', 'NES', 'GBA', 'GBC', 'Game Boy', 'Virtual Boy', 'Anders'];
+const ALL_PLATFORMS = ['Switch 2', 'Switch', 'Switch Online', 'Wii U', 'Wii', '3DS', 'DS', 'GameCube', 'N64', 'SNES', 'NES', 'GBA', 'GBC', 'Game Boy', 'Virtual Boy', 'Anders'];
 const shortPlatform = (p) => {
   const name = typeof p === 'string' ? p : p.name;
   for (const [re, s] of PLATFORM_SHORT) if (re.test(name)) return s;
   return (typeof p === 'object' && p.abbreviation) || name;
 };
+// Oude consoles die ook via Nintendo Switch Online te spelen zijn
+const NSO_PLATFORMS = ['NES', 'SNES', 'N64', 'Game Boy', 'GBC', 'GBA', 'GameCube', 'Virtual Boy'];
+// Platforms waarop jij de game speelt/gespeeld hebt (meerdere mogelijk, bv. GBA + Switch Online)
+const myPlats = (g) => (g.myPlatforms?.length ? g.myPlatforms : g.myPlatform ? [g.myPlatform] : []);
+const platLabel = (g) => myPlats(g).join(' + ') || g.platforms?.[0] || '';
+// myPlatform (het eerste) blijft bestaan voor toestellen met een oudere versie van de app
+const platPatch = (list) => ({ myPlatforms: list, myPlatform: list[0] || null });
 
 // ---------- Opslag ----------
 const store = {
@@ -84,6 +92,8 @@ const store = {
   save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch { toast('Opslaan mislukt'); } },
 };
 let games = store.load('gl.games', []);
+// Van één platform (myPlatform) naar een lijst (myPlatforms); geen echte wijziging, dus vóór de sync-snapshot
+for (const g of games) if (!Array.isArray(g.myPlatforms)) g.myPlatforms = g.myPlatform ? [g.myPlatform] : [];
 const prefs = Object.assign({ tab: 'home', sort: 'added' }, store.load('gl.prefs', {}));
 if (!TABS.some(t => t.id === prefs.tab)) prefs.tab = ['playing', 'backlog', 'wishlist'].includes(prefs.tab) ? 'library' : 'home';
 // Elke wijziging krijgt een tijdstip (updatedAt) en verwijderde games worden onthouden (gl.deleted),
@@ -256,7 +266,7 @@ function badgeHTML(g) {
 function cardHTML(g, { ref, sub } = {}) {
   const owned = ref ? null : g;
   const mine = owned || ownedBy(g.key);
-  const subline = sub ?? [g.myPlatform || g.platforms?.[0], g.year].filter(Boolean).join(' · ');
+  const subline = sub ?? [platLabel(g), g.year].filter(Boolean).join(' · ');
   const ownedTag = !owned && mine ? `<span class="absolute left-1.5 top-1.5 z-[2] rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">${esc(listById[mine.status].short)}</span>` : '';
   return `<button data-open="${esc(ref || g.id)}" class="group min-w-0 text-left">
     ${coverHTML(mine && !owned ? { ...g, cover: mine.cover || g.cover } : g, { cls: 'group-active:scale-95', extra: badgeHTML(mine || g) + ownedTag })}
@@ -408,7 +418,7 @@ function renderLibrary() {
 }
 
 const BROWSE = {
-  platforms: { title: 'Platforms', of: (g) => g.myPlatform ? [g.myPlatform] : [...new Set((g.platforms || []).map(shortPlatform))] },
+  platforms: { title: 'Platforms', of: (g) => myPlats(g).length ? myPlats(g) : [...new Set((g.platforms || []).map(shortPlatform))] },
   series: { title: 'Series', of: (g) => g.franchise ? [g.franchise] : [] },
   genres: { title: 'Genres', of: (g) => (g.info?.genres?.length ? g.info.genres : g.genres) || [] },
 };
@@ -510,11 +520,10 @@ function heroHTML(g) {
       </div>
     </div>`;
   }
-  const extra = extrasFor(g.igdbId);
-  const pt = g.info?.playtime || extra?.playtime;
-  const hours = pt && (pt.normally || pt.hastily || pt.completely);
+  const pt = hltbFor(g.igdbId);
+  const hours = pt && (pt.main || pt.plus || pt.complete);
   const genre = (g.info?.genres?.length ? g.info.genres : g.genres || [])[0];
-  const line = [genre, g.myPlatform || g.platforms?.[0]].filter(Boolean).join(' · ');
+  const line = [genre, platLabel(g)].filter(Boolean).join(' · ');
   const art = g.artwork ? imgUrl(g.artwork, 1280) : null;
   const cover = coverSrc(g);
   const bg = art || (cover ? imgUrl(cover) : null);
@@ -582,7 +591,7 @@ function renderHome() {
     return `<button data-hero="${g.id}" class="flex-none rounded-2xl p-2 text-left transition-colors ${sel ? 'bg-accent/12 ring-2 ring-accent/70' : 'active:bg-surface'}">
       ${coverHTML(g, { cls: 'w-full' })}
       <div class="mt-2 truncate text-[15px] font-semibold">${esc(g.title)}</div>
-      <div class="truncate text-[13px] ${sel ? 'font-semibold text-accent' : 'text-muted'}">${esc(g.myPlatform || g.platforms?.[0] || '')}</div>
+      <div class="truncate text-[13px] ${sel ? 'font-semibold text-accent' : 'text-muted'}">${esc(platLabel(g))}</div>
     </button>`;
   };
 
@@ -825,10 +834,13 @@ const openUpcoming = () => loadDataset().then(() => {
 });
 
 // ---------- Swipen: wat heb ik gespeeld? ----------
-// Per franchise een stapel kaarten: naar rechts = gespeeld (komt in Uitgespeeld, zonder datum),
-// naar links = niet gespeeld (wordt niet meer gevraagd). Details vul je later zelf aan.
+// Per franchise een stapel kaarten: naar rechts = uitgespeeld (komt in Uitgespeeld, zonder datum),
+// omhoog = gespeeld maar niet uitgespeeld (komt in Gestopt), naar links = niet gespeeld (wordt niet
+// meer gevraagd). Details vul je later zelf aan.
 const SWIPE_TOP = '__top';
-const swipe = { set: null, queue: [], history: [], yes: 0, no: 0, busy: false };
+const swipe = { set: null, queue: [], history: [], yes: 0, part: 0, no: 0, busy: false };
+// Keuze -> lijst in de bibliotheek (links/'no' voegt niks toe)
+const SWIPE_STATUS = { yes: 'finished', up: 'stopped' };
 const swipedNo = new Set(store.load('gl.swipedNo', []));
 const saveSwipedNo = () => { store.save('gl.swipedNo', [...swipedNo]); scheduleSync(); };
 const swipeName = (set) => (set === SWIPE_TOP ? 'Populair' : set);
@@ -849,7 +861,7 @@ function openSwipe(set = null) {
 }
 
 function startSwipe(set) {
-  Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, no: 0, busy: false });
+  Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, part: 0, no: 0, busy: false });
   renderSwipe();
 }
 
@@ -871,7 +883,7 @@ function renderSwipePicker() {
   const el = $('#swipeBody');
   el.innerHTML = `
     <p class="mb-3 text-[13px] text-muted">Veeg naar <b class="text-[#4fd18b]">rechts</b> als je een game gespeeld hebt, naar <b class="text-[#ff5c5c]">links</b> als niet.
-      Gespeelde games komen in <b class="text-ink">Uitgespeeld</b>; cijfer en details vul je later aan.</p>
+      Rechts = <b class="text-ink">Uitgespeeld</b>, omhoog = gespeeld maar niet uitgespeeld (<b class="text-ink">Gestopt</b>), links = niet gespeeld. Cijfer en details vul je later aan.</p>
     <div class="grid grid-cols-2 gap-2.5 pb-6 lg:grid-cols-4">${sets.map(tile).join('')}</div>`;
   el.scrollTop = 0;
   hydrate(el);
@@ -880,9 +892,11 @@ function renderSwipePicker() {
 
 function swipeCardHTML(e, top) {
   const plats = (e.platforms || []).slice(0, 3).join(', ');
-  const stamp = (kind, text, color, side) => `<div data-stamp="${kind}" class="pointer-events-none absolute ${side} top-5 z-[3] rounded-lg border-4 px-2 py-0.5 text-[26px] font-black tracking-wide opacity-0" style="border-color:${color};color:${color};transform:rotate(${kind === 'yes' ? -14 : 14}deg)">${text}</div>`;
+  const tilt = { yes: -14, no: 14, up: 0 };
+  const stamp = (kind, text, color, pos) => `<div data-stamp="${kind}" class="pointer-events-none absolute ${pos} z-[3] rounded-lg border-4 px-2 py-0.5 text-[26px] font-black tracking-wide opacity-0" style="border-color:${color};color:${color};rotate:${tilt[kind]}deg">${text}</div>`;
   return `<div ${top ? 'id="swipeCard"' : ''} class="relative col-start-1 row-start-1 flex min-h-0 select-none flex-col rounded-2xl bg-surface p-2.5 shadow-2xl shadow-black/50 ${top ? 'z-[2] cursor-grab touch-none' : 'z-[1] scale-[.94] translate-y-3 opacity-60'}">
-    ${top ? stamp('yes', 'GESPEELD', '#4fd18b', 'left-5') + stamp('no', 'NIET', '#ff5c5c', 'right-5') : ''}
+    ${top ? stamp('yes', 'UITGESPEELD', '#4fd18b', 'left-5 top-5') + stamp('no', 'NIET', '#ff5c5c', 'right-5 top-5')
+      + stamp('up', 'GESPEELD', '#f5b84a', 'left-1/2 -translate-x-1/2 bottom-24') : ''}
     ${coverHTML(e, { cls: 'min-h-0 w-full flex-1 aspect-auto! rounded-xl! shadow-none!', w: 640 })}
     <div class="flex-none px-1 pb-0.5 pt-2.5"><div class="line-clamp-2 text-[20px] font-bold leading-tight">${esc(e.title)}</div>
       <div class="mt-0.5 truncate text-[14px] text-muted">${esc([e.year, plats].filter(Boolean).join(' · '))}</div></div>
@@ -893,7 +907,8 @@ function renderSwipe() {
   const { set, queue, history } = swipe;
   const total = history.length + queue.length;
   $('#swipeTitle').textContent = swipeName(set);
-  $('#swipeMeta').textContent = queue.length ? `${history.length + 1} van ${total} · ${swipe.yes} gespeeld` : `${swipe.yes} gespeeld · ${swipe.no} niet`;
+  const tally = [`${swipe.yes} uitgespeeld`, swipe.part ? `${swipe.part} gespeeld` : ''].filter(Boolean).join(' · ');
+  $('#swipeMeta').textContent = queue.length ? `${history.length + 1} van ${total} · ${tally}` : `${tally} · ${swipe.no} niet`;
   const el = $('#swipeBody');
   const btn = (attrs, cls, icon, label) => `<button ${attrs} aria-label="${label}" class="grid place-items-center rounded-full bg-surface shadow-lg active:scale-90 ${cls}">${icon}</button>`;
   const undo = btn(`data-swipe-undo ${history.length ? '' : 'disabled'}`, 'size-12 text-muted disabled:opacity-30', svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>'), 'Ongedaan maken');
@@ -901,10 +916,11 @@ function renderSwipe() {
     el.innerHTML = `<div class="m-auto flex flex-col items-center px-6 py-10 text-center">
       <div class="mb-3 grid size-16 place-items-center rounded-full bg-[#4fd18b]/15 text-[#4fd18b] [&_svg]:size-8">${ICONS.finished}</div>
       <b class="text-[20px]">${total ? `Klaar met ${esc(swipeName(set))}!` : `Niks meer te doen bij ${esc(swipeName(set))}`}</b>
-      <p class="mt-1 text-[13px] text-muted">${total ? `${swipe.yes} gespeeld, ${swipe.no} niet gespeeld.` : 'Alle games staan al in je bibliotheek of zijn al langsgekomen.'}</p>
+      <p class="mt-1 text-[13px] text-muted">${total ? `${swipe.yes} uitgespeeld, ${swipe.part} gespeeld, ${swipe.no} niet gespeeld.` : 'Alle games staan al in je bibliotheek of zijn al langsgekomen.'}</p>
       <div class="mt-5 flex flex-col gap-2">
         <button data-swipe-pickers class="rounded-full bg-accent px-5 py-2.5 font-bold text-white">Andere franchise</button>
         ${swipe.yes ? `<button data-tab="finished" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk Uitgespeeld</button>` : ''}
+        ${swipe.part ? `<button data-tab="stopped" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk Gestopt</button>` : ''}
       </div>
       ${history.length ? `<div class="mt-6">${undo}</div>` : ''}
     </div>`;
@@ -914,20 +930,26 @@ function renderSwipe() {
     <div class="mx-auto grid min-h-0 w-full max-w-[460px] flex-1 grid-rows-[minmax(0,1fr)] pt-2" style="max-height:760px">
       ${queue[1] ? swipeCardHTML(queue[1], false) : ''}${swipeCardHTML(queue[0], true)}
     </div>
-    <div class="flex flex-none items-center justify-center gap-6 pb-3 pt-4">
-      ${btn('data-swipe-no', 'size-16 text-[#ff5c5c] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M18 6 6 18M6 6l12 12"/>'), 'Niet gespeeld')}
+    <div class="flex flex-none items-center justify-center gap-4 pb-3 pt-4">
       ${undo}
-      ${btn('data-swipe-yes', 'size-16 text-[#4fd18b] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M20 6 9 17l-5-5"/>'), 'Gespeeld')}
+      ${btn('data-swipe-no', 'size-16 text-[#ff5c5c] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M18 6 6 18M6 6l12 12"/>'), 'Niet gespeeld')}
+      ${btn('data-swipe-up', 'size-14 text-[#f5b84a] [&_svg]:size-7 [&_svg]:stroke-[3]', svg('<path d="M12 19V5M5 12l7-7 7 7"/>'), 'Gespeeld, niet uitgespeeld')}
+      ${btn('data-swipe-yes', 'size-16 text-[#4fd18b] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M20 6 9 17l-5-5"/>'), 'Uitgespeeld')}
     </div>`;
   bindSwipeCard($('#swipeCard'));
   hydrate(el);
 }
 
+const SWIPE_DIST = 90;
+// Welke kant op: omhoog telt pas als je duidelijk meer omhoog dan opzij veegt
+const swipeDir = (dx, dy) => (-dy > Math.abs(dx) ? 'up' : dx > 0 ? 'yes' : 'no');
+
 function placeCard(card, dx, dy) {
-  card.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx / 16}deg)`;
-  const p = Math.min(1, Math.abs(dx) / 90);
-  card.querySelector('[data-stamp="yes"]').style.opacity = dx > 0 ? p : 0;
-  card.querySelector('[data-stamp="no"]').style.opacity = dx < 0 ? p : 0;
+  const dir = swipeDir(dx, dy);
+  const up = dir === 'up';
+  card.style.transform = `translate(${dx}px, ${up ? dy : dy * 0.3}px) rotate(${dx / 16}deg)`;
+  const p = Math.min(1, (up ? -dy : Math.abs(dx)) / SWIPE_DIST);
+  for (const kind of ['yes', 'no', 'up']) card.querySelector(`[data-stamp="${kind}"]`).style.opacity = dir === kind ? p : 0;
 }
 
 function bindSwipeCard(card) {
@@ -950,32 +972,41 @@ function bindSwipeCard(card) {
     if (x0 == null) return;
     x0 = null;
     card.classList.replace('cursor-grabbing', 'cursor-grab');
-    if (Math.abs(dx) > 90) swipeDecide(dx > 0);
+    const dir = swipeDir(dx, dy);
+    if ((dir === 'up' ? -dy : Math.abs(dx)) > SWIPE_DIST) swipeDecide(dir);
     else { card.style.transition = 'transform .25s'; placeCard(card, 0, 0); }
   };
   card.addEventListener('pointerup', end);
   card.addEventListener('pointercancel', end);
 }
 
-function swipeDecide(played) {
+// choice: 'yes' (uitgespeeld), 'up' (gespeeld, niet uitgespeeld) of 'no' (niet gespeeld)
+function swipeDecide(choice) {
   const card = $('#swipeCard');
   if (!card || swipe.busy) return;
   swipe.busy = true;
   card.style.transition = 'transform .25s ease-in, opacity .25s';
-  placeCard(card, played ? 140 : -140, 0); // stempel tonen
-  card.style.transform = `translate(${played ? '' : '-'}130vw, 40px) rotate(${played ? 30 : -30}deg)`;
+  if (choice === 'up') {
+    placeCard(card, 0, -140); // stempel tonen
+    card.style.transform = 'translate(0, -120vh)';
+  } else {
+    const right = choice === 'yes';
+    placeCard(card, right ? 140 : -140, 0);
+    card.style.transform = `translate(${right ? '' : '-'}130vw, 40px) rotate(${right ? 30 : -30}deg)`;
+  }
   navigator.vibrate?.(10);
   setTimeout(() => {
     const e = swipe.queue.shift();
-    if (played) {
-      const rec = addFromView(e, 'finished');
+    const status = SWIPE_STATUS[choice];
+    if (status) {
+      const rec = addFromView(e, status);
       rec.finishedAt = null; // datum onbekend: telt niet mee als "uitgespeeld in <jaar>"
       saveGames();
-      swipe.history.push({ e, played, id: rec.id });
-      swipe.yes++;
+      swipe.history.push({ e, choice, id: rec.id });
+      swipe[choice === 'yes' ? 'yes' : 'part']++;
     } else {
       swipedNo.add(e.key); saveSwipedNo();
-      swipe.history.push({ e, played });
+      swipe.history.push({ e, choice });
       swipe.no++;
     }
     swipe.busy = false;
@@ -986,7 +1017,7 @@ function swipeDecide(played) {
 function swipeUndo() {
   const h = swipe.history.pop();
   if (!h || swipe.busy) return;
-  if (h.played) { games = games.filter(g => g.id !== h.id); saveGames(); swipe.yes--; }
+  if (h.id) { games = games.filter(g => g.id !== h.id); saveGames(); swipe[h.choice === 'yes' ? 'yes' : 'part']--; }
   else { swipedNo.delete(h.e.key); saveSwipedNo(); swipe.no--; }
   swipe.queue.unshift(h.e);
   renderSwipe();
@@ -994,8 +1025,9 @@ function swipeUndo() {
 
 document.addEventListener('keydown', (e) => {
   if ($('#swipeScreen').hidden || !swipe.set || e.target.closest('input, textarea, select')) return;
-  if (e.key === 'ArrowRight') swipeDecide(true);
-  else if (e.key === 'ArrowLeft') swipeDecide(false);
+  if (e.key === 'ArrowRight') swipeDecide('yes');
+  else if (e.key === 'ArrowLeft') swipeDecide('no');
+  else if (e.key === 'ArrowUp') { e.preventDefault(); swipeDecide('up'); }
   else if (e.key === 'Backspace' || e.key.toLowerCase() === 'z') swipeUndo();
 });
 $('#swipeBack').addEventListener('click', () => {
@@ -1249,7 +1281,7 @@ async function fetchDetailsFor(ref) {
   if (currentRef === ref && !$('#detailScreen').hidden) renderDetail();
 }
 
-// Critici-score (0–100, kleur zoals Metacritic) en speeltijd volgens spelers
+// Critici-score (0–100, IGDB-gemiddelde van recensies; kleur zoals Metacritic) en speeltijd volgens spelers
 // Uren zoals HowLongToBeat: op halve uren, met ½ ("11½ uur", "20 uur"); vanaf 50 uur hele uren
 const fmtHours = (h) => {
   const r = h >= 50 ? Math.round(h) : Math.max(0.5, Math.round(h * 2) / 2);
@@ -1257,38 +1289,45 @@ const fmtHours = (h) => {
   return `${whole || !half ? whole : ''}${half} uur`;
 };
 function scoresHTML(critic, playtime, title) {
-  let html = '';
-  // Speelduur zoals HowLongToBeat: per speelstijl een rij met de uren in een blok ernaast
-  const rows = [['hastily', 'Hoofdverhaal', 'alleen het verhaal'], ['normally', 'Verhaal + extra', 'met zijmissies'], ['completely', 'Alles (100%)', 'alles uitspelen']]
+  // Speelduur zoals HowLongToBeat (compact: per speelstijl een regel met de uren in een blokje),
+  // met de critici-score als tegel links ervan
+  const rows = [['main', 'Hoofdverhaal'], ['plus', 'Verhaal + extra'], ['complete', 'Alles (100%)']]
     .filter(([k]) => playtime?.[k]);
-  const hltb = `https://howlongtobeat.com/?q=${encodeURIComponent(title)}`;
-  const link = `<a href="${hltb}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[13px] font-semibold text-accent">HowLongToBeat
-    ${svg('<path d="M7 17 17 7M8 7h9v9"/>', 'size-3.5! stroke-[2.5]!')}</a>`;
-  if (rows.length) {
-    html += `<div class="mt-6">
-      <div class="mb-2 flex items-baseline justify-between">${label('Hoe lang duurt het?').replace('mb-2', 'mb-0')}${link}</div>
-      <div class="flex flex-col gap-1 overflow-hidden rounded-2xl bg-surface p-1.5">
-        ${rows.map(([k, t, sub]) => `<div class="flex items-stretch gap-2">
-          <div class="flex min-w-0 flex-1 flex-col justify-center py-2 pl-2.5">
-            <b class="text-[16px] leading-tight">${t}</b><span class="text-[12px] text-muted">${sub}</span>
-          </div>
-          <div class="grid w-[46%] max-w-[190px] flex-none place-items-center rounded-xl bg-[#3f74b8] px-2 py-3 text-[18px] font-semibold text-white">${fmtHours(playtime[k])}</div>
-        </div>`).join('')}
-      </div>
-      <p class="mt-1.5 text-[11px] text-muted">Gemiddelde speeltijd volgens spelers (IGDB). Precieze cijfers per speelstijl op HowLongToBeat.</p>
-    </div>`;
-  } else {
-    html += `<div class="mt-6 flex items-center justify-between rounded-2xl bg-surface p-3.5">
-      <span class="text-[13px] text-muted">Speelduur nog onbekend</span>${link}</div>`;
-  }
+  // Geen speeltijd en geen recensies: blok helemaal weglaten; anders alleen tonen wat er is
+  if (!rows.length && !critic) return '';
+  const ext = (href, text) => `<a href="${href}" target="_blank" rel="noopener" class="inline-flex items-center gap-0.5 font-semibold text-accent">${text}
+    ${svg('<path d="M7 17 17 7M8 7h9v9"/>', 'size-3! stroke-[2.5]!')}</a>`;
+  const q = encodeURIComponent(title);
+  const hltb = ext(playtime?.id ? `https://howlongtobeat.com/game/${playtime.id}` : `https://howlongtobeat.com/?q=${q}`, 'HowLongToBeat');
+  const meta = ext(`https://www.metacritic.com/search/${q}/`, 'Metacritic');
+  const times = rows.length
+    ? `<div class="flex min-w-0 flex-1 flex-col justify-center gap-1 rounded-2xl bg-surface p-1.5">${rows.map(([k, t]) => `<div class="flex items-center gap-2 py-0.5 pl-2">
+        <span class="min-w-0 flex-1 truncate text-[14px] font-semibold">${t}</span>
+        <span class="w-[5.5rem] flex-none rounded-lg bg-[#3f74b8] py-1.5 text-center text-[15px] font-semibold text-white">${fmtHours(playtime[k])}</span>
+      </div>`).join('')}</div>`
+    : '';
+  let score = '';
   if (critic) {
     const c = critic.score >= 75 ? '#4fd18b' : critic.score >= 50 ? '#f5b84a' : '#ff5c5c';
-    html += `<div class="mt-2.5 flex items-center gap-3 rounded-2xl bg-surface p-3">
-      <div class="grid size-12 flex-none place-items-center rounded-xl text-[22px] font-extrabold" style="background:${c};color:#0f1115">${critic.score}</div>
-      <div><b class="block">Critici-score</b><span class="text-[12px] text-muted">${critic.count > 1 ? `gemiddelde van ${critic.count} recensies` : critic.count === 1 ? 'op basis van 1 recensie' : 'uit recensies'} · IGDB</span></div>
-    </div>`;
+    const n = critic.count > 1 ? `${critic.count} recensies` : critic.count === 1 ? '1 recensie' : 'recensies';
+    const tile = `<div class="grid size-12 flex-none place-items-center rounded-xl text-[22px] font-extrabold" style="background:${c};color:#0f1115">${critic.score}</div>`;
+    // Naast de speeltijd een smalle tegel, zonder speeltijd een brede rij
+    score = rows.length
+      ? `<div class="flex w-[5.75rem] flex-none flex-col items-center justify-center rounded-2xl bg-surface p-2 text-center">
+          ${tile}<b class="mt-1 text-[13px] leading-tight">Critici</b><span class="text-[11px] leading-tight text-muted">${n}</span></div>`
+      : `<div class="flex flex-1 items-center gap-3 rounded-2xl bg-surface p-3">
+          ${tile}<div><b class="block">Critici</b><span class="text-[12px] text-muted">gemiddelde van ${n}</span></div></div>`;
   }
-  return html;
+  const players = playtime?.players >= 1000 ? `${(playtime.players / 1000).toLocaleString('nl', { maximumFractionDigits: 1 })}k` : playtime?.players;
+  const notes = [rows.length ? `Speeltijd volgens ${players} spelers op ${hltb}` : '', critic ? `score = gemiddelde van recensies (IGDB), zie ook ${meta}` : ''].filter(Boolean).join('; ');
+  return `<div class="mt-6">
+    ${label(rows.length ? 'Hoe lang duurt het?' : 'Recensies')}
+    <div class="flex items-stretch gap-2">
+      ${score}
+      ${times}
+    </div>
+    <p class="mt-1.5 text-[11px] text-muted">${notes}.</p>
+  </div>`;
 }
 
 function renderDetail() {
@@ -1303,6 +1342,7 @@ function renderDetail() {
   const cd = countdown(g.release);
   const trailer = g.trailer || g.youtube || info?.youtube;
   const platforms = [...new Set([...(g.platforms || []).map(shortPlatform)])];
+  const mine_ = myPlats(g);
   const genres = info?.genres?.length ? info.genres : g.genres || [];
 
   // Nog niet uit: spelen, uitspelen of ermee stoppen kan nog niet
@@ -1331,7 +1371,7 @@ function renderDetail() {
   const ytSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(g.title + ' trailer')}`;
   const extra = extrasFor(g.igdbId);
   const critic = info?.critic || extra?.critic;
-  const playtime = info?.playtime || extra?.playtime;
+  const playtime = hltbFor(g.igdbId); // speeltijd van HowLongToBeat (die van IGDB is te vaak op 1 speler gebaseerd)
 
   detachNotes(); // editor bewaren, niet opnieuw maken (anders verlies je de cursor tijdens het typen)
   $('#detailBody').innerHTML = `
@@ -1375,9 +1415,9 @@ function renderDetail() {
     </div>
 
     <div class="mt-6">
-      ${label('Mijn platform')}
+      ${label(['backlog', 'wishlist', 'interested'].includes(g.status) ? 'Mijn platform' : 'Gespeeld op')}
       <div class="flex flex-wrap gap-1.5">
-        ${platforms.map(p => `<button data-platform="${esc(p)}" class="rounded-full px-3 py-1.5 text-[13px] font-semibold ${g.myPlatform === p ? 'bg-ink text-bg' : 'bg-surface text-muted'}">${esc(p)}</button>`).join('')}
+        ${platformChoices(g, platforms).map(p => `<button data-platform="${esc(p)}" aria-pressed="${mine_.includes(p)}" class="rounded-full px-3 py-1.5 text-[13px] font-semibold ${mine_.includes(p) ? 'bg-ink text-bg' : 'bg-surface text-muted'}">${mine_.includes(p) ? '✓ ' : ''}${esc(p)}</button>`).join('')}
         <button data-add-platform class="rounded-full border border-dashed border-line px-3 py-1.5 text-[13px] font-semibold text-muted">+ Platform</button>
       </div>
     </div>
@@ -1427,6 +1467,7 @@ function addFromView(g, status) {
   const sorted = (g.platforms || []).map(p => (typeof p === 'string' ? { name: p } : p));
   const platforms = [...new Set(sorted.map(shortPlatform))];
   const myPlatform = platforms.find(p => NINTENDO_RE.test(p)) || platforms[0] || null;
+  const myPlatforms = myPlatform ? [myPlatform] : [];
   const rec = {
     id: uid(),
     sourceKey: g.key, source: g.source, qid: g.qid || null,
@@ -1434,7 +1475,7 @@ function addFromView(g, status) {
     title: g.title,
     cover: coverSrc(g), coverFile: g.coverFile || null,
     release: g.release || (g.year ? String(g.year) : null), year: g.year || null,
-    platforms, myPlatform,
+    platforms, myPlatform, myPlatforms,
     franchise: g.franchise || null,
     wikiTitle: g.wikiTitle || null, nlTitle: g.nlTitle || null,
     youtube: g.youtube || null, trailer: null,
@@ -1454,6 +1495,13 @@ function addFromView(g, status) {
 }
 
 // `silent`: automatisch opgehaalde gegevens (artwork, info), geen wijziging van jou
+// Keuzes bij 'Gespeeld op': de platforms van de game, wat je zelf toevoegde, en Switch Online bij retro-games
+function platformChoices(g, platforms) {
+  const list = [...platforms, ...myPlats(g)];
+  if (platforms.some(p => NSO_PLATFORMS.includes(p))) list.push('Switch Online');
+  return [...new Set(list)];
+}
+
 function updateGame(id, patch, { silent = false } = {}) {
   const g = games.find(x => x.id === id);
   if (!g) return;
@@ -1494,10 +1542,16 @@ $('#detailBody').addEventListener('click', async (e) => {
     return;
   }
   const p = e.target.closest('[data-platform]');
-  if (p && owned) { updateGame(g.id, { myPlatform: p.dataset.platform }); renderDetail(); return; }
+  if (p && owned) {
+    const v = p.dataset.platform, cur = myPlats(g);
+    updateGame(g.id, platPatch(cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]));
+    renderDetail();
+    return;
+  }
   if (e.target.closest('[data-add-platform]') && owned) {
-    const choice = await pick('Platform toevoegen', ALL_PLATFORMS.filter(x => !g.platforms.includes(x)).map(x => ({ value: x, label: x })));
-    if (choice) { updateGame(g.id, { platforms: [...g.platforms, choice], myPlatform: choice }); renderDetail(); }
+    const shown = platformChoices(g, [...new Set((g.platforms || []).map(shortPlatform))]);
+    const choice = await pick('Platform toevoegen', ALL_PLATFORMS.filter(x => !shown.includes(x)).map(x => ({ value: x, label: x })));
+    if (choice) { updateGame(g.id, platPatch([...new Set([...myPlats(g), choice])])); renderDetail(); }
     return;
   }
   const t = e.target.closest('[data-trailer]');
@@ -1776,8 +1830,9 @@ document.addEventListener('click', (e) => {
   const pickSet = e.target.closest('[data-swipe-pick]');
   if (pickSet) { startSwipe(pickSet.dataset.swipePick); return; }
   if (e.target.closest('[data-swipe-pickers]')) { renderSwipePicker(); return; }
-  if (e.target.closest('[data-swipe-yes]')) { swipeDecide(true); return; }
-  if (e.target.closest('[data-swipe-no]')) { swipeDecide(false); return; }
+  if (e.target.closest('[data-swipe-yes]')) { swipeDecide('yes'); return; }
+  if (e.target.closest('[data-swipe-up]')) { swipeDecide('up'); return; }
+  if (e.target.closest('[data-swipe-no]')) { swipeDecide('no'); return; }
   if (e.target.closest('[data-swipe-undo]')) { swipeUndo(); return; }
   if (e.target.closest('[data-manual]')) { openManual(); return; }
   if (e.target.closest('[data-online-search]')) { searchOnline($('#searchInput').value.trim()); return; }
@@ -1856,6 +1911,8 @@ function showUpdateBanner(apply) {
 render();
 loadDataset().then(() => { if (prefs.tab === 'home' || prefs.tab === 'discover') render(); enrichOwned(); }).catch(() => {});
 loadExtras().then(() => { if (!$('#detailScreen').hidden) renderDetail(); });
+const afterHltb = () => { if (!$('#detailScreen').hidden) renderDetail(); else if (prefs.tab === 'home') render(); };
+loadHltb(afterHltb).then(afterHltb);
 // Nieuwe gamedatabase binnen (wekelijkse update of de knop in Meer): opnieuw tekenen
 onDatasetUpdate(() => { render(); enrichOwned(); });
 setupUpdates();

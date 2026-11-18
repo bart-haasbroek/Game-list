@@ -21,14 +21,14 @@ export default defineConfig({
         background_color: '#0f1115',
         theme_color: '#0f1115',
         icons: [
-          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: 'icons/icon-192.png?v=2', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+          { src: 'icons/icon-512.png?v=2', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       workbox: {
         // De gamedatabase zit niet in de precache: die komt uit /api/games en wordt door de app zelf bewaard (src/data.js)
         // extras.json (critici-score en speeltijd, ~170 KB) wel: dan staat die ook offline in het gameprofiel
-        globPatterns: ['**/*.{js,css,html,png,svg}', 'data/extras.json'],
+        globPatterns: ['**/*.{js,css,html,png,svg}', 'data/extras.json', 'data/hltb.json'],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/api\//, /^\/\.netlify\//],
         runtimeCaching: [
