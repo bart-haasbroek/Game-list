@@ -1,0 +1,22 @@
+[build]
+  command = "yarn build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# Netlify Image CDN: covers verkleinen en omzetten naar WebP via /.netlify/images
+[images]
+  remote_images = ["https://upload\\.wikimedia\\.org/.*", "https://images\\.igdb\\.com/.*"]
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Lokaal testen met zoekfunctie: `npx netlify-cli dev`
+[dev]
+  command = "yarn dev"
+  targetPort = 5173
+  framework = "#custom"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

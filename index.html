@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Game List</title>
+  <meta name="theme-color" content="#0f1115">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Game List">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body>
+  <div class="flex h-full flex-col">
+    <!-- Kop -->
+    <header class="pt-safe flex flex-none items-center justify-between gap-2 px-4 pb-2.5">
+      <div class="flex min-w-0 items-center gap-1">
+        <button id="backBtn" class="-ml-2 grid size-9 flex-none place-items-center rounded-full active:bg-surface-2" aria-label="Terug" hidden>
+          <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="min-w-0">
+          <h1 id="viewTitle" class="truncate text-[26px] font-bold tracking-tight">Home</h1>
+          <div id="viewMeta" class="truncate text-[13px] text-muted"></div>
+        </div>
+      </div>
+      <label id="sortBtn" class="relative grid size-10 flex-none place-items-center rounded-full active:bg-surface-2" aria-label="Sorteren" hidden>
+        <svg viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
+        <select id="sortSelect" class="absolute inset-0 text-base opacity-0">
+          <option value="added">Laatst toegevoegd</option>
+          <option value="title">Titel A–Z</option>
+          <option value="rating">Hoogste cijfer</option>
+          <option value="release">Releasedatum</option>
+        </select>
+      </label>
+    </header>
+
+    <!-- Home -->
+    <main id="homeView" class="view pb-grid no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4" hidden></main>
+
+    <!-- Lijsten binnen de Bibliotheek -->
+    <main id="listView" class="view pb-grid no-scrollbar grid flex-1 grid-cols-3 content-start gap-x-2.5 gap-y-3.5 overflow-y-auto overscroll-contain px-4 pt-1 sm:grid-cols-5" hidden></main>
+
+    <!-- Bibliotheek (tegels per lijst + bladeren) -->
+    <main id="libraryView" class="view pb-grid no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4" hidden></main>
+
+    <!-- Ontdek -->
+    <section id="discoverView" class="view flex min-h-0 flex-1 flex-col" hidden>
+      <div class="flex-none px-4 pb-2">
+        <div class="flex h-[42px] items-center gap-2 rounded-xl bg-surface px-3">
+          <svg viewBox="0 0 24 24" class="size-[18px]! flex-none text-muted"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="searchInput" type="search" placeholder="Zoeken in games…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" class="min-w-0 flex-1 bg-transparent outline-none">
+          <button id="clearSearch" class="text-muted" aria-label="Wissen" hidden><svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div id="discoverBody" class="pb-grid no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4"></div>
+    </section>
+
+    <!-- Meer -->
+    <main id="moreView" class="view pb-grid no-scrollbar flex flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain px-4" hidden></main>
+
+    <button id="addBtn" class="bottom-fab fixed right-[18px] z-[5] grid size-14 place-items-center rounded-full bg-accent text-white shadow-[0_8px_24px_rgba(255,60,76,.4)] active:scale-95" aria-label="Game toevoegen" hidden>
+      <svg viewBox="0 0 24 24" class="size-[26px]! stroke-[2.5]!"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+
+    <nav id="tabs" class="pb-tabs fixed inset-x-0 bottom-0 z-[4] grid grid-cols-4 border-t border-line bg-[#14161c]/90 backdrop-blur-xl"></nav>
+  </div>
+
+  <!-- Info-pagina van een game -->
+  <section id="detailScreen" class="fixed inset-0 z-10 flex animate-push shadow-2xl flex-col bg-bg" hidden>
+    <div id="detailBg" class="absolute inset-x-0 top-0 h-[340px] scale-125 bg-cover bg-center blur-[30px] brightness-50 saturate-150 [mask-image:linear-gradient(#000_40%,transparent)]"></div>
+    <header class="pt-safe absolute inset-x-0 top-0 z-[2] flex items-center justify-between px-4 pb-2.5">
+      <button class="grid size-10 place-items-center rounded-full bg-black/45 backdrop-blur-md" data-close aria-label="Terug">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <button id="deleteBtn" class="grid size-10 place-items-center rounded-full bg-black/45 text-[#ff8a94] backdrop-blur-md" aria-label="Verwijderen">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </header>
+    <div id="detailBody" class="pb-safe relative flex-1 overflow-y-auto overscroll-contain px-[18px] pt-[calc(env(safe-area-inset-top,0px)+64px)]"></div>
+  </section>
+
+  <!-- Franchise-map / lijst van games -->
+  <section id="folderScreen" class="fixed inset-0 z-[9] flex animate-push shadow-2xl flex-col bg-bg" hidden>
+    <header class="pt-safe flex flex-none items-center gap-1 px-4 pb-2.5">
+      <button class="-ml-2 grid size-9 place-items-center rounded-full active:bg-surface-2" data-close aria-label="Terug">
+        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="min-w-0">
+        <h2 id="folderTitle" class="truncate text-[22px] font-bold tracking-tight"></h2>
+        <div id="folderMeta" class="text-[13px] text-muted"></div>
+      </div>
+    </header>
+    <div id="folderBody" class="pb-safe no-scrollbar grid flex-1 grid-cols-3 content-start gap-x-2.5 gap-y-3.5 overflow-y-auto overscroll-contain px-4 pt-1 sm:grid-cols-5"></div>
+  </section>
+
+  <!-- Handmatig -->
+  <section id="manualScreen" class="fixed inset-0 z-20 flex animate-slide-up flex-col bg-bg" hidden>
+    <header class="pt-safe flex flex-none items-center justify-between px-4 pb-2.5">
+      <button class="py-2 font-semibold text-muted" data-close>Annuleer</button>
+      <strong>Handmatig toevoegen</strong>
+      <button class="py-2 font-semibold text-accent" id="manualSave">Bewaar</button>
+    </header>
+    <form id="manualForm" class="pb-safe flex flex-col gap-3.5 overflow-y-auto px-4 pt-2 [&_label]:flex [&_label]:flex-col [&_label]:gap-1.5 [&_label]:text-[13px] [&_label]:font-semibold [&_label]:text-muted [&_:is(input,select)]:appearance-none [&_:is(input,select)]:rounded-xl [&_:is(input,select)]:bg-surface [&_:is(input,select)]:p-3 [&_:is(input,select)]:text-base [&_:is(input,select)]:font-normal [&_:is(input,select)]:text-ink [&_:is(input,select)]:outline-none">
+      <label>Titel<input name="title" required></label>
+      <label>Platform<select name="platform"></select></label>
+      <label>Releasedatum<input name="release" type="date"></label>
+      <label>Cover-URL (optioneel)<input name="cover" type="url" placeholder="https://…"></label>
+      <label>Lijst<select name="status"></select></label>
+    </form>
+  </section>
+
+  <!-- Trailer-popup -->
+  <div id="trailer" class="fixed inset-0 z-50 flex animate-fade flex-col items-center justify-center bg-black/90 px-3" hidden>
+    <button data-close-trailer class="pt-safe absolute right-3 top-0 grid size-11 place-items-center rounded-full text-white" aria-label="Sluiten">
+      <svg viewBox="0 0 24 24" class="size-7!"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+    <div id="trailerFrame" class="aspect-video w-full max-w-3xl overflow-hidden rounded-xl bg-black"></div>
+    <button data-close-trailer class="mt-5 rounded-full bg-white/15 px-6 py-2.5 font-semibold text-white">Sluiten</button>
+  </div>
+
+  <!-- Keuze-sheet -->
+  <div id="picker" class="pb-safe fixed inset-0 z-30 flex animate-fade items-end bg-black/55 px-2.5" hidden>
+    <div class="w-full animate-slide-up">
+      <div id="pickerTitle" class="rounded-t-[14px] bg-surface p-3 text-center text-[13px] text-muted"></div>
+      <div id="pickerOptions" class="max-h-[60vh] overflow-y-auto rounded-b-[14px]"></div>
+      <button data-cancel class="mt-2 w-full rounded-[14px] bg-surface p-[15px] text-base font-bold">Annuleer</button>
+    </div>
+  </div>
+
+  <input type="file" id="importInput" accept="application/json,.json" hidden>
+  <div id="toast" class="bottom-fab fixed left-1/2 z-40 mb-[70px] -translate-x-1/2 animate-fade whitespace-nowrap rounded-full bg-ink px-4 py-2.5 text-sm font-semibold text-bg" hidden></div>
+</body>
+</html>
