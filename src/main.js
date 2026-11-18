@@ -1250,26 +1250,29 @@ async function fetchDetailsFor(ref) {
 }
 
 // Critici-score (0–100, kleur zoals Metacritic) en speeltijd volgens spelers
-const fmtHours = (h) => (h >= 10 ? Math.round(h) : String(Math.round(h * 2) / 2).replace('.', ',')) + ' u';
+// Uren zoals HowLongToBeat: op halve uren, met ½ ("11½ uur", "20 uur"); vanaf 50 uur hele uren
+const fmtHours = (h) => {
+  const r = h >= 50 ? Math.round(h) : Math.max(0.5, Math.round(h * 2) / 2);
+  const whole = Math.floor(r), half = r - whole ? '½' : '';
+  return `${whole || !half ? whole : ''}${half} uur`;
+};
 function scoresHTML(critic, playtime, title) {
   let html = '';
-  // Speelduur zoals HowLongToBeat: Main Story / Main + Extras / Completionist, met balkjes
-  const rows = [['hastily', 'Main Story', 'alleen het hoofdverhaal'], ['normally', 'Main + Extras', 'verhaal plus zijmissies'], ['completely', 'Completionist', 'alles 100% uitspelen']]
+  // Speelduur zoals HowLongToBeat: per speelstijl een rij met de uren in een blok ernaast
+  const rows = [['hastily', 'Hoofdverhaal', 'alleen het verhaal'], ['normally', 'Verhaal + extra', 'met zijmissies'], ['completely', 'Alles (100%)', 'alles uitspelen']]
     .filter(([k]) => playtime?.[k]);
   const hltb = `https://howlongtobeat.com/?q=${encodeURIComponent(title)}`;
   const link = `<a href="${hltb}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-[13px] font-semibold text-accent">HowLongToBeat
     ${svg('<path d="M7 17 17 7M8 7h9v9"/>', 'size-3.5! stroke-[2.5]!')}</a>`;
   if (rows.length) {
-    const max = Math.max(...rows.map(([k]) => playtime[k]));
     html += `<div class="mt-6">
       <div class="mb-2 flex items-baseline justify-between">${label('Hoe lang duurt het?').replace('mb-2', 'mb-0')}${link}</div>
-      <div class="flex flex-col gap-3.5 rounded-2xl bg-surface p-3.5">
-        ${rows.map(([k, t, sub]) => `<div>
-          <div class="mb-1.5 flex items-baseline justify-between gap-2">
-            <span><b class="text-[15px]">${t}</b> <span class="text-[12px] text-muted">${sub}</span></span>
-            <b class="flex-none text-[17px]">${fmtHours(playtime[k])}</b>
+      <div class="flex flex-col gap-1 overflow-hidden rounded-2xl bg-surface p-1.5">
+        ${rows.map(([k, t, sub]) => `<div class="flex items-stretch gap-2">
+          <div class="flex min-w-0 flex-1 flex-col justify-center py-2 pl-2.5">
+            <b class="text-[16px] leading-tight">${t}</b><span class="text-[12px] text-muted">${sub}</span>
           </div>
-          <div class="h-2 overflow-hidden rounded-full bg-surface-2"><div class="h-full rounded-full bg-accent" style="width:${Math.max(6, Math.round(playtime[k] / max * 100))}%"></div></div>
+          <div class="grid w-[46%] max-w-[190px] flex-none place-items-center rounded-xl bg-[#3f74b8] px-2 py-3 text-[18px] font-semibold text-white">${fmtHours(playtime[k])}</div>
         </div>`).join('')}
       </div>
       <p class="mt-1.5 text-[11px] text-muted">Gemiddelde speeltijd volgens spelers (IGDB). Precieze cijfers per speelstijl op HowLongToBeat.</p>
