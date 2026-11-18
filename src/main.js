@@ -9,7 +9,7 @@ import {
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
 import { loadExtras, extrasFor } from './extras.js';
 import { loadHltb, hltbFor } from './hltb.js';
-import { mountNotes, destroyNotes, notesPreviewHTML, notesText } from './notes.js';
+import { mountNotes, destroyNotes, notesPreviewHTML, notesText, preloadNotes } from './notes.js';
 
 const APP_VERSION = '3.1.0';
 const COVER_CACHE = 'covers-v2';
@@ -304,22 +304,40 @@ function cardHTML(g, { ref, sub } = {}) {
 const rowScroller = (items) => `<div class="row-scroller no-scrollbar -mx-4 flex items-start gap-2.5 overflow-x-auto px-4 pb-1 [&>*]:w-[104px] [&>*]:flex-none">${items}</div>`;
 
 // ---------- Schermen openen/sluiten (app-gevoel) ----------
+// Modal (van onderen): achtergrond dimmen, net onder de modal
+const openModals = new Set();
+function syncBackdrop() {
+  const bd = $('#modalBackdrop');
+  const top = [...openModals].at(-1);
+  if (top) {
+    bd.style.zIndex = (parseInt(getComputedStyle(top).zIndex, 10) || 20) - 1;
+    if (bd.hidden) { bd.hidden = false; void bd.offsetWidth; }
+    bd.classList.add('is-on');
+  } else if (!bd.hidden) {
+    bd.classList.remove('is-on');
+    setTimeout(() => { if (!openModals.size) bd.hidden = true; }, 300);
+  }
+}
+
 function showScreen(el) {
-  el.classList.remove('screen-out', 'sheet-out');
+  el.classList.remove('screen-out', 'sheet-out', 'modal-out');
   el.style.transform = '';
   el.style.transition = '';
   el.hidden = false;
+  if (el.classList.contains('modal')) { openModals.delete(el); openModals.add(el); syncBackdrop(); }
 }
 
 function hideScreen(el, { animate = true, after } = {}) {
   if (el.hidden) return;
+  const modal = el.classList.contains('modal');
+  if (modal) { openModals.delete(el); syncBackdrop(); }
   if (!animate) { el.hidden = true; after?.(); return; }
-  el.classList.add(el.id === 'detailScreen' || el.id === 'folderScreen' ? 'screen-out' : 'sheet-out');
+  el.classList.add(modal ? 'modal-out' : el.id === 'detailScreen' || el.id === 'folderScreen' ? 'screen-out' : 'sheet-out');
   setTimeout(() => {
     el.hidden = true;
-    el.classList.remove('screen-out', 'sheet-out');
+    el.classList.remove('screen-out', 'sheet-out', 'modal-out');
     after?.();
-  }, 200);
+  }, modal ? 340 : 200);
 }
 
 // Terugvegen vanaf de linkerrand, zoals in iOS-apps
@@ -542,7 +560,8 @@ function heroImgUrl(src) {
   const up = (n) => Math.ceil(n * dpr / 100) * 100; // afronden, zodat de cache vaker raak is
   const w = up(desk ? Math.min(innerWidth - 240 - 64, 1100) : innerWidth);
   const h = up((desk ? 440 : Math.min(innerHeight * 0.62, 500)) * 1.15); // +15%: ruimte voor pull-to-zoom
-  return `/.netlify/images?url=${encodeURIComponent(src.replace('/t_1080p/', '/t_original/'))}&w=${w}&h=${h}&fit=cover&fm=webp&q=72`;
+  // Bron: de 1080p-versie (niet t_original: die is vaak 4K+ en tientallen MB, dan duurt de eerste keer lang)
+  return `/.netlify/images?url=${encodeURIComponent(src.replace('/t_original/', '/t_1080p/'))}&w=${w}&h=${h}&fit=cover&fm=webp&q=72`;
 }
 
 function heroHTML(g) {
@@ -569,10 +588,14 @@ function heroHTML(g) {
   const sub = DONE.includes(g.status) && g.finishedAt ? `Uitgespeeld op ${formatRelease(g.finishedAt)}` : '';
   const art = g.artwork ? heroImgUrl(g.artwork) : null;
   const cover = coverSrc(g);
-  const bg = art || (cover ? imgUrl(cover) : null);
+  // Onderlaag: de (vage) cover, die er meestal al is; de artwork faadt er rustig overheen zodra hij binnen is.
+  // Al eens getoond (bv. Home opnieuw getekend)? Dan meteen zichtbaar, zonder flits of opnieuw infaden.
+  const seen = art && shownBefore(art);
+  const blur = cover ? `<div class="absolute inset-0 scale-125 bg-cover bg-center blur-2xl brightness-[.55] saturate-150" style="background-image:url('${esc(imgUrl(cover)).replace(/'/g, '%27')}')"></div>` : '';
+  const artImg = art ? `<img src="${esc(art)}" alt="" decoding="async" fetchpriority="high" onload="this.style.opacity=1;__shown.add(this.src)"
+      class="absolute inset-0 size-full object-cover ${seen ? '' : 'opacity-0 transition-opacity duration-500'}">` : '';
   return `<div id="hero" class="home-hero relative -mx-4 overflow-hidden bg-surface" style="height:var(--hero-h)">
-    <div id="heroImg" class="absolute inset-0 origin-top bg-cover bg-center will-change-transform ${art ? '' : 'scale-125 blur-2xl brightness-[.55] saturate-150'}"
-      style="${bg ? `background-image:url('${esc(bg).replace(/'/g, '%27')}')` : ''}"></div>
+    <div id="heroImg" class="absolute inset-0 origin-top overflow-hidden will-change-transform">${seen ? '' : blur}${artImg}</div>
     <div class="absolute inset-0 bg-linear-to-b from-black/50 via-black/0 via-35% to-bg"></div>
     ${title}
     ${art ? '' : cover ? `<div class="absolute left-1/2 top-[44%] z-[1] w-[34%] max-w-[170px] -translate-x-1/2 -translate-y-1/2">${coverHTML(g, { cls: 'shadow-2xl! shadow-black/60!', placeholder: false })}</div>` : ''}
@@ -1690,6 +1713,7 @@ function renderDetail() {
 
     ${g.wikiTitle || g.nlTitle ? `<a href="https://${g.nlTitle ? 'nl' : 'en'}.wikipedia.org/wiki/${encodeURIComponent((g.nlTitle || g.wikiTitle).replace(/ /g, '_'))}" target="_blank" rel="noopener" class="mt-5 block text-center text-[12px] text-muted underline">Lees meer op Wikipedia</a>` : ''}
   `;
+  if (owned) setTimeout(() => preloadNotes().catch(() => {}), 800); // editor alvast laden voor de notities-modal
   hydrate($('#detailBody')).then(() => {
     const img = $('#detailBody img[src]');
     if (img && !src) $('#detailBg').style.backgroundImage = `url("${img.src}")`;
@@ -1747,12 +1771,24 @@ function updateGame(id, patch, { silent = false } = {}) {
 function openNotes(g) {
   const id = g.id;
   $('#notesTitle').textContent = g.title;
-  $('#notesBody').innerHTML = '<div id="notesMount" class="flex min-h-0 flex-1 flex-col"></div>';
-  showScreen($('#notesScreen'));
-  mountNotes($('#notesMount'), id, g.notes, (html) => {
-    const rec = games.find(x => x.id === id);
-    if (rec) { rec.notes = html; rec.updatedAt = Date.now(); saveGames(); }
-  }, { focus: !notesText(g.notes) }); // leeg: meteen typen; anders eerst rustig lezen
+  // Tijdens het inschuiven alleen een voorbeeld tonen; de editor pas daarna opbouwen (anders hapert de animatie)
+  $('#notesBody').innerHTML = `<div id="notesMount" class="flex min-h-0 flex-1 flex-col">
+    <div class="notes-toolbar h-[49px] flex-none border-b border-line"></div>
+    <div class="notes-scroll min-h-0 flex-1 overflow-y-auto"><div class="notes-editor notes-big">${notesPreviewHTML(g.notes)}</div></div></div>`;
+  const screen = $('#notesScreen');
+  showScreen(screen);
+  preloadNotes().catch(() => {});
+  let mounted = false;
+  const mount = () => {
+    if (mounted || screen.hidden) return;
+    mounted = true;
+    mountNotes($('#notesMount'), id, g.notes, (html) => {
+      const rec = games.find(x => x.id === id);
+      if (rec) { rec.notes = html; rec.updatedAt = Date.now(); saveGames(); }
+    }, { focus: !notesText(g.notes) }); // leeg: meteen typen; anders eerst rustig lezen
+  };
+  screen.addEventListener('animationend', mount, { once: true });
+  setTimeout(mount, 600); // reserve (bv. als animaties uit staan)
 }
 function closeNotes() {
   if ($('#notesScreen').hidden) return;
