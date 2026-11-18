@@ -1,5 +1,6 @@
 # Werkt de gamedatabase bij: haalt alle Nintendo-games uit IGDB en zet ze in Netlify Blobs.
 # Geen nieuwe deploy nodig: de app ziet de nieuwe data via /api/games-meta.
+# Draait elke maandag, via de knop in de app, en vanzelf na een push die build-data.mjs of igdb.mjs wijzigt.
 #
 # Secrets (GitHub > Settings > Secrets and variables > Actions):
 #   TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET  - IGDB
@@ -11,6 +12,11 @@ on:
   schedule:
     - cron: '0 4 * * 1' # elke maandag 04:00 UTC
   workflow_dispatch: # handmatig: knop in de app (via /api/refresh) of in GitHub > Actions
+  push: # meteen opnieuw bouwen als de manier van ophalen/filteren verandert
+    branches: [main]
+    paths:
+      - scripts/build-data.mjs
+      - netlify/lib/igdb.mjs
 
 concurrency:
   group: update-data
