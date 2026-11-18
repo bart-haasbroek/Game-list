@@ -45,6 +45,22 @@ export async function igdb(endpoint, body, tries = 4) {
 export const coverUrl = (imageId, size = 't_cover_big_2x') =>
   imageId ? `https://images.igdb.com/igdb/image/upload/${size}/${imageId}.jpg` : null;
 
+// Beste liggende afbeelding van een game (query met artworks.image_id/width/height/artwork_type en
+// screenshots.image_id): key art zonder logo > artwork > key art met logo > screenshot. Geen logo's/covers.
+export function pickArtwork(g, size = 't_1080p') {
+  const rank = { 2: 0, 1: 1, 15: 1, 3: 2, 4: 3 };
+  const arts = (g.artworks || [])
+    .filter(a => a.image_id && (a.artwork_type == null || a.artwork_type in rank))
+    .map(a => {
+      const ratio = a.width && a.height ? a.width / a.height : 1.5;
+      // Liggend (breder dan ~4:3) gaat voor; daarbinnen het type, dan de grootte
+      return { a, score: (ratio >= 1.25 ? 0 : 10) + (rank[a.artwork_type] ?? 1) - Math.min(a.width || 0, 3840) / 10000 };
+    })
+    .sort((x, y) => x.score - y.score);
+  const best = arts.find(x => x.score < 10)?.a || g.screenshots?.[0] || arts[0]?.a;
+  return best ? `https://images.igdb.com/igdb/image/upload/${size}/${best.image_id}.jpg` : null;
+}
+
 // IGDB-platform-id -> korte naam zoals in de app
 export const NINTENDO_PLATFORMS = {
   130: 'Switch', 508: 'Switch 2', 41: 'Wii U', 5: 'Wii',

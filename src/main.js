@@ -610,6 +610,7 @@ function renderDiscover() {
     setHeader('Ontdek', `${datasetInfo().count.toLocaleString('nl-NL')} Nintendo-games`);
     body.innerHTML = q ? discoverResultsHTML(q) : discoverHomeHTML();
     hydrate(body);
+    if (!q) loadFranchiseArt(body);
   }).catch(() => {
     body.innerHTML = notice('De gamelijst kon niet geladen worden.<small>Open de app een keer met internet, dan werkt hij daarna ook offline.</small>');
   });
@@ -617,13 +618,47 @@ function renderDiscover() {
 
 const notice = (html) => `<div class="px-3 py-10 text-center text-muted [&_small]:mt-1.5 [&_small]:block [&_small]:opacity-80">${html}</div>`;
 
+// Liggende afbeelding per franchise-tegel (artwork van het vlaggenschip), bewaard per IGDB-id ('' = geen)
+const FR_ART_KEY = 'gl.franchiseArt';
+let franchiseArt;
+try { franchiseArt = JSON.parse(localStorage.getItem(FR_ART_KEY)) || {}; } catch { franchiseArt = {}; }
+const frArtTried = new Set();
+
+function franchiseArtHTML(e) {
+  const art = e.igdbId && franchiseArt[e.igdbId];
+  if (!art) {
+    return `<div data-fr-art="${e.igdbId || ''}" class="absolute inset-0 opacity-60 [&>div]:aspect-auto! [&>div]:size-full [&>div]:rounded-none! [&>div]:shadow-none!">${coverHTML(e, { placeholder: false })}</div>`;
+  }
+  return `<img src="${esc(imgUrl(art, 640))}" data-orig="${esc(art)}" alt="" loading="lazy" onload="this.style.opacity=.75" onerror="${IMG_ERROR}"
+    class="absolute inset-0 size-full object-cover opacity-0 transition-opacity duration-300">`;
+}
+
+// Ontbrekende artworks in één keer ophalen en de tegels bijwerken
+async function loadFranchiseArt(root) {
+  const slots = [...root.querySelectorAll('[data-fr-art]')].filter(el => el.dataset.frArt);
+  const ids = [...new Set(slots.map(el => el.dataset.frArt))].filter(id => !(id in franchiseArt) && !frArtTried.has(id));
+  if (!ids.length || !online()) return;
+  ids.forEach(id => frArtTried.add(id));
+  try {
+    const res = await fetch('/api/artworks?ids=' + ids.join(','));
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('json')) return; // bv. yarn dev zonder functions
+    const d = await res.json();
+    for (const id of ids) franchiseArt[id] = d[id] || '';
+    try { localStorage.setItem(FR_ART_KEY, JSON.stringify(franchiseArt)); } catch {}
+    // Opnieuw zoeken: Ontdek kan intussen opnieuw getekend zijn
+    for (const el of document.querySelectorAll('[data-fr-art]')) {
+      if (franchiseArt[el.dataset.frArt]) el.outerHTML = franchiseArtHTML({ igdbId: el.dataset.frArt });
+    }
+  } catch {}
+}
+
 function discoverHomeHTML() {
   const up = upcoming(20);
   const fr = franchiseList();
   const tile = (f) => {
     const e = franchiseCover(f.name);
     return `<button data-franchise="${esc(f.name)}" class="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface text-left active:scale-[.97]">
-      ${e ? `<div class="absolute inset-0 opacity-60 [&>div]:aspect-auto! [&>div]:size-full [&>div]:rounded-none! [&>div]:shadow-none!">${coverHTML(e, { placeholder: false })}</div>` : ''}
+      ${e ? franchiseArtHTML(e) : ''}
       <div class="absolute inset-0 bg-linear-to-t from-black/90 via-black/40 to-transparent"></div>
       <div class="absolute inset-x-0 bottom-0 p-2.5">
         <div class="flex items-center gap-1.5 font-bold leading-tight [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-accent">${ICONS.folder}<span class="truncate">${esc(f.name)}</span></div>
@@ -773,27 +808,30 @@ function renderSwipePicker() {
     .filter((f, i) => f.left > 0 && (i < 60));
   const tile = ({ name, left }) => {
     const cover = name === SWIPE_TOP ? popularGames(1)[0] : franchiseCover(name);
-    return `<button data-swipe-pick="${esc(name)}" class="flex items-center gap-3 rounded-2xl bg-surface p-2.5 text-left active:scale-[.97]">
-      ${cover ? coverHTML(cover, { cls: 'w-11 flex-none rounded-md! shadow-none!', placeholder: false }) : '<span class="w-11"></span>'}
-      <span class="min-w-0"><b class="block truncate">${esc(swipeName(name))}</b><span class="text-[12px] text-muted">nog ${left}</span></span></button>`;
+    return `<button data-swipe-pick="${esc(name)}" class="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface text-left active:scale-[.97]">
+      ${cover ? franchiseArtHTML(cover) : ''}
+      <div class="absolute inset-0 bg-linear-to-t from-black/90 via-black/30 to-transparent"></div>
+      <div class="absolute inset-x-0 bottom-0 p-2.5"><b class="block truncate text-[16px] leading-tight">${esc(swipeName(name))}</b>
+        <span class="text-[12px] text-white/70">nog ${left}</span></div></button>`;
   };
   const el = $('#swipeBody');
   el.innerHTML = `
     <p class="mb-3 text-[13px] text-muted">Veeg naar <b class="text-[#4fd18b]">rechts</b> als je een game gespeeld hebt, naar <b class="text-[#ff5c5c]">links</b> als niet.
       Gespeelde games komen in <b class="text-ink">Uitgespeeld</b>; cijfer en details vul je later aan.</p>
-    <div class="grid grid-cols-2 gap-2 pb-6 lg:grid-cols-4">${sets.map(tile).join('')}</div>`;
+    <div class="grid grid-cols-2 gap-2.5 pb-6 lg:grid-cols-4">${sets.map(tile).join('')}</div>`;
   el.scrollTop = 0;
   hydrate(el);
+  loadFranchiseArt(el);
 }
 
 function swipeCardHTML(e, top) {
   const plats = (e.platforms || []).slice(0, 3).join(', ');
   const stamp = (kind, text, color, side) => `<div data-stamp="${kind}" class="pointer-events-none absolute ${side} top-5 z-[3] rounded-lg border-4 px-2 py-0.5 text-[26px] font-black tracking-wide opacity-0" style="border-color:${color};color:${color};transform:rotate(${kind === 'yes' ? -14 : 14}deg)">${text}</div>`;
-  return `<div ${top ? 'id="swipeCard"' : ''} class="relative col-start-1 row-start-1 select-none rounded-2xl bg-surface p-2.5 shadow-2xl shadow-black/50 ${top ? 'z-[2] cursor-grab touch-none' : 'z-[1] scale-[.94] translate-y-3 opacity-60'}">
+  return `<div ${top ? 'id="swipeCard"' : ''} class="relative col-start-1 row-start-1 flex min-h-0 select-none flex-col rounded-2xl bg-surface p-2.5 shadow-2xl shadow-black/50 ${top ? 'z-[2] cursor-grab touch-none' : 'z-[1] scale-[.94] translate-y-3 opacity-60'}">
     ${top ? stamp('yes', 'GESPEELD', '#4fd18b', 'left-5') + stamp('no', 'NIET', '#ff5c5c', 'right-5') : ''}
-    ${coverHTML(e, { cls: 'w-full rounded-xl! shadow-none!' })}
-    <div class="px-1 pb-0.5 pt-2.5"><div class="line-clamp-2 text-[17px] font-bold leading-tight">${esc(e.title)}</div>
-      <div class="mt-0.5 truncate text-[13px] text-muted">${esc([e.year, plats].filter(Boolean).join(' · '))}</div></div>
+    ${coverHTML(e, { cls: 'min-h-0 w-full flex-1 aspect-auto! rounded-xl! shadow-none!', w: 640 })}
+    <div class="flex-none px-1 pb-0.5 pt-2.5"><div class="line-clamp-2 text-[20px] font-bold leading-tight">${esc(e.title)}</div>
+      <div class="mt-0.5 truncate text-[14px] text-muted">${esc([e.year, plats].filter(Boolean).join(' · '))}</div></div>
   </div>`;
 }
 
@@ -819,10 +857,10 @@ function renderSwipe() {
     return;
   }
   el.innerHTML = `
-    <div class="mx-auto grid w-full flex-none pt-2" style="max-width:min(320px, calc((100dvh - 330px) * .68))">
+    <div class="mx-auto grid min-h-0 w-full max-w-[460px] flex-1 grid-rows-[minmax(0,1fr)] pt-2" style="max-height:760px">
       ${queue[1] ? swipeCardHTML(queue[1], false) : ''}${swipeCardHTML(queue[0], true)}
     </div>
-    <div class="flex flex-none items-center justify-center gap-6 py-5">
+    <div class="flex flex-none items-center justify-center gap-6 pb-3 pt-4">
       ${btn('data-swipe-no', 'size-16 text-[#ff5c5c] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M18 6 6 18M6 6l12 12"/>'), 'Niet gespeeld')}
       ${undo}
       ${btn('data-swipe-yes', 'size-16 text-[#4fd18b] [&_svg]:size-8 [&_svg]:stroke-[3]', svg('<path d="M20 6 9 17l-5-5"/>'), 'Gespeeld')}

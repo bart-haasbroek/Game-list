@@ -46,6 +46,48 @@ export const CURATED_FRANCHISES = [
   { name: 'Just Dance', re: /just dance/i, alias: ['Just Dance'] },
   { name: 'Minecraft', re: /minecraft/i, alias: ['Minecraft'] },
 ];
+// Vlaggenschip per franchise: de afbeelding van de map komt van deze game (populairste match).
+// Een getal = IGDB-id. Zonder vlaggenschip: de populairste uitgekomen game van de reeks.
+const FRANCHISE_HEROES = {
+  'Mario': /^super mario odyssey$/i,
+  'Zelda': /^the legend of zelda: breath of the wild$/i,
+  'Pokémon': /^pok[eé]mon legends: arceus$/i,
+  'Kirby': /^kirby and the forgotten land$/i,
+  'Donkey Kong': /^donkey kong bananza$/i,
+  'Metroid': /^metroid dread$/i,
+  'Star Fox': /^star fox zero$/i,
+  'Yoshi': /^yoshi's crafted world$/i,
+  'Wario': /^warioware: get it together!?$/i,
+  'Fire Emblem': /^fire emblem: three houses$/i,
+  'Animal Crossing': /^animal crossing: new horizons$/i,
+  'Splatoon': /^splatoon 3$/i,
+  'Pikmin': /^pikmin 4$/i,
+  'Super Smash Bros.': /^super smash bros\. ultimate$/i,
+  'Xenoblade': /^xenoblade chronicles 3$/i,
+  'F-Zero': /^f-zero gx$/i,
+  'Kid Icarus': /^kid icarus: uprising$/i,
+  'Professor Layton': /^professor layton and the miracle mask$/i,
+  'Advance Wars': /^advance wars 1\+2/i,
+  'Punch-Out!!': 2194, // Punch-Out!! (Wii); er zijn meer games met precies die naam
+  'Bayonetta': /^bayonetta 3$/i,
+  'Sonic': /^sonic (frontiers|mania)$/i,
+  'Bomberman': /^super bomberman r$/i,
+  'Mega Man': /^mega man 11$/i,
+  'Pac-Man': /^pac-man world re-pac$/i,
+  'Rayman & Rabbids': /^rayman legends/i,
+  'Crash Bandicoot': /^crash bandicoot 4/i,
+  'Spyro': 1582, // The Legend of Spyro: A New Beginning
+  'Final Fantasy': /^final fantasy vii remake/i,
+  'Dragon Quest': /^dragon quest xi s/i,
+  'Monster Hunter': /^monster hunter rise$/i,
+  'Shin Megami Tensei & Persona': /^persona 5 royal$/i,
+  'Story of Seasons': /^story of seasons: a wonderful life$/i,
+  'Tetris': /^tetris effect/i,
+  'Street Fighter': /^street fighter 6$/i,
+  'Mortal Kombat': /^mortal kombat 11$/i,
+  'LEGO': /^lego star wars: the skywalker saga$/i,
+  'Minecraft': /^minecraft$/i,
+};
 const curatedNames = new Set(CURATED_FRANCHISES.map(f => f.name));
 const aliasMap = new Map(CURATED_FRANCHISES.flatMap(f => f.alias.map(a => [a.toLowerCase(), f.name])));
 
@@ -130,6 +172,7 @@ function apply(data) {
   byFranchise = new Map();
   for (const e of entries) if (e.franchise) (byFranchise.get(e.franchise) || byFranchise.set(e.franchise, []).get(e.franchise)).push(e);
   for (const list of byFranchise.values()) list.sort((a, b) => String(b.release || '0').localeCompare(String(a.release || '0')));
+  heroCache.clear();
 }
 
 export function loadDataset() {
@@ -248,10 +291,17 @@ export const franchiseGames = (name) => byFranchise.get(name) || [];
 /** Populairste games (IGDB: aantal beoordelingen + hype) */
 export const popularGames = (limit = 300) => (entries ? entries.slice().sort((a, b) => b.pop - a.pop).slice(0, limit) : []);
 
+const heroCache = new Map();
 export function franchiseCover(name) {
-  // Nieuwste game met een cover als voorkant van de map
-  const list = franchiseGames(name);
-  return list.find(e => (e.coverFile || e.cover) && !isFuture(e.release)) || list.find(e => e.coverFile || e.cover) || null;
+  // Voorkant van de map: het vlaggenschip, anders de populairste uitgekomen game met een cover
+  if (heroCache.has(name)) return heroCache.get(name);
+  const withCover = franchiseGames(name).filter(e => e.coverFile || e.cover);
+  const byPop = (list) => list.slice().sort((a, b) => b.pop - a.pop)[0];
+  const re = FRANCHISE_HEROES[name];
+  const hero = (re && byPop(withCover.filter(e => typeof re === 'number' ? e.igdbId === re : re.test(e.title))))
+    || byPop(withCover.filter(e => !isFuture(e.release))) || withCover[0] || null;
+  if (entries) heroCache.set(name, hero);
+  return hero;
 }
 
 // Aankomende games. `notable`: alleen bekendere titels (met hype/beoordelingen in IGDB of uit een franchise)

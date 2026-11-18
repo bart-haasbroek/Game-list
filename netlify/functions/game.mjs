@@ -1,6 +1,6 @@
 // Details van één game uit IGDB: omschrijving, genres, ontwikkelaar, uitgever, trailer, Wikipedia-links,
 // critici-score en speeltijd (time-to-beat).
-import { igdb, igdbConfigured, json } from '../lib/igdb.mjs';
+import { igdb, igdbConfigured, json, pickArtwork } from '../lib/igdb.mjs';
 
 const hours = (sec) => (sec ? Math.round(sec / 360) / 10 : 0);
 
@@ -18,7 +18,7 @@ export default async (req) => {
     const [[g], [ttb]] = await Promise.all([
       igdb('games', `fields summary, genres.name, involved_companies.developer, involved_companies.publisher,
   involved_companies.company.name, videos.video_id, videos.name, websites.url, aggregated_rating, aggregated_rating_count,
-  artworks.image_id, screenshots.image_id;
+  artworks.image_id, artworks.width, artworks.height, artworks.artwork_type, screenshots.image_id;
 where id = ${id};`),
       igdb('game_time_to_beats', `fields hastily, normally, completely; where game_id = ${id};`).catch(() => []),
     ]);
@@ -35,7 +35,7 @@ where id = ${id};`),
       wikiTitle: wikiTitle(urls, 'en'),
       nlTitle: wikiTitle(urls, 'nl'),
       // Liggende afbeelding voor de grote kop op Home (artwork, anders een screenshot)
-      artwork: (() => { const a = g.artworks?.[0] || g.screenshots?.[0]; return a ? `https://images.igdb.com/igdb/image/upload/t_1080p/${a.image_id}.jpg` : null; })(),
+      artwork: pickArtwork(g),
       critic: g.aggregated_rating ? { score: Math.round(g.aggregated_rating), count: g.aggregated_rating_count || 0 } : null,
       playtime: ttb && (ttb.hastily || ttb.normally || ttb.completely)
         ? { hastily: hours(ttb.hastily), normally: hours(ttb.normally), completely: hours(ttb.completely) } : null,
