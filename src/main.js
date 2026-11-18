@@ -19,6 +19,7 @@ const ICONS = {
   home: svg('<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>'),
   playing: svg('<path d="M6 11h4M8 9v4"/><path d="M15 12h.01M18 10h.01"/><path d="M17.3 5H6.7a4 4 0 0 0-4 3.6C2.6 9.4 2 14.5 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.4-1.4A2 2 0 0 1 9.8 16h4.4a2 2 0 0 1 1.4.6L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.5-.6-6.6-.7-7.3A4 4 0 0 0 17.3 5z"/>'),
   finished: svg('<circle cx="12" cy="12" r="10"/><path d="m8.5 12 2.5 2.5 5-5"/>'),
+  completed: svg('<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.6 3.9M17 6h2.5a2.5 2.5 0 0 1-2.6 3.9"/>'),
   backlog: svg('<path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>'),
   wishlist: svg('<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/>'),
   interested: svg('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'),
@@ -40,18 +41,21 @@ const ICONS = {
 
 const LISTS = [
   { id: 'playing',    label: 'Speel ik',    short: 'Speel ik',   empty: 'Je speelt nu niks. Tijd voor iets nieuws?' },
-  { id: 'backlog',    label: 'Nog spelen',  short: 'Nog spelen', empty: 'Games die je hebt maar nog niet gespeeld hebt komen hier.' },
+  { id: 'backlog',    label: 'Op de plank', short: 'Op de plank', empty: 'Games die je hebt maar nog niet gespeeld hebt komen hier.' },
   { id: 'wishlist',   label: 'Wishlist',    short: 'Wishlist',   empty: 'Je wishlist is leeg. Aangekondigde games krijgen hier een afteller.' },
   { id: 'finished',   label: 'Uitgespeeld', short: 'Klaar',      empty: 'Nog niks uitgespeeld.' },
+  { id: 'completed',  label: 'Compleet',    short: '100%',       empty: 'Games die je helemaal (100%) hebt uitgespeeld komen hier.' },
   { id: 'interested', label: 'Interessant', short: 'Interesse',  empty: 'Games die je leuk lijken komen hier.' },
   { id: 'stopped',    label: 'Gestopt',     short: 'Gestopt',    empty: 'Games waar je mee gestopt bent komen hier.' },
 ];
 // Kleur per lijst (tegels in de Bibliotheek)
-const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', interested: '#f5b84a', stopped: '#b5776b' };
-const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'interested', 'stopped'];
+const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', interested: '#f5b84a', stopped: '#b5776b' };
+const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'completed', 'interested', 'stopped'];
 const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
 // Lijsten die alleen kunnen als de game al uit is
-const NEEDS_RELEASE = ['playing', 'finished', 'stopped'];
+const NEEDS_RELEASE = ['playing', 'finished', 'completed', 'stopped'];
+// Uitgespeeld of compleet: allebei 'klaar' (uitspeeldatum, 'uitgespeeld in <jaar>', Laatst uitgespeeld)
+const DONE = ['finished', 'completed'];
 const TABS = [
   { id: 'home', label: 'Home' },
   { id: 'library', label: 'Bibliotheek' },
@@ -569,7 +573,7 @@ function renderHome() {
     .sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')) || (b.addedAt ?? 0) - (a.addedAt ?? 0));
   const hero = heroGame(playing);
   const top = games.filter(g => g.rating != null).sort((a, b) => b.rating - a.rating).slice(0, 10);
-  const lastFinished = games.filter(g => g.status === 'finished').sort((a, b) => String(b.finishedAt || '').localeCompare(String(a.finishedAt || ''))).slice(0, 10);
+  const lastFinished = games.filter(g => DONE.includes(g.status)).sort((a, b) => String(b.finishedAt || '').localeCompare(String(a.finishedAt || ''))).slice(0, 10);
   const nintendoUpcoming = upcoming(30).filter(e => !ownedBy(e.key)).slice(0, 15);
 
   // "Aan het spelen": tik = in de kop zetten, nog eens tikken = info-pagina
@@ -596,7 +600,7 @@ function renderHome() {
     ${homeHead('Overzicht')}
     <div class="home-tiles grid grid-cols-2 gap-2.5">
       ${tile(count('playing'), 'speel ik nu', 'playing', true)}
-      ${tile(count('backlog'), 'nog te spelen', 'backlog')}
+      ${tile(count('backlog'), 'op de plank', 'backlog')}
       ${tile(count('wishlist'), 'op mijn wishlist', 'wishlist')}
       ${tile(finishedYear, `uitgespeeld in ${year}`, 'finished')}
     </div>
@@ -1341,7 +1345,7 @@ function renderDetail() {
 
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
-      <div class="grid grid-cols-3 gap-1.5">${statusBtns}</div>
+      <div class="grid grid-cols-4 gap-1.5">${statusBtns}</div>
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
@@ -1361,7 +1365,7 @@ function renderDetail() {
       </div>
     </div>
 
-    ${g.status === 'playing' || g.status === 'finished' || g.startedAt || g.finishedAt ? `
+    ${g.status === 'playing' || DONE.includes(g.status) || g.startedAt || g.finishedAt ? `
     <div class="mt-6">
       ${label('Datums')}
       <div class="flex gap-2.5">
@@ -1422,7 +1426,7 @@ function addFromView(g, status) {
     status, rating: null, notes: '',
     addedAt: Date.now(),
     startedAt: status === 'playing' ? today() : null,
-    finishedAt: status === 'finished' ? today() : null,
+    finishedAt: DONE.includes(status) ? today() : null,
   };
   games.push(rec);
   saveGames();
@@ -1458,7 +1462,7 @@ $('#detailBody').addEventListener('click', async (e) => {
     } else {
       const patch = { status };
       if (status === 'playing' && !g.startedAt) patch.startedAt = today();
-      if (status === 'finished' && !g.finishedAt) patch.finishedAt = today();
+      if (DONE.includes(status) && !g.finishedAt) patch.finishedAt = today();
       updateGame(g.id, patch);
       toast(`Verplaatst naar ${listById[status].label}`);
     }

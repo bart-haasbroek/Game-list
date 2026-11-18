@@ -90,6 +90,9 @@
 
 /* ---------- Desktop: menu links in een zijbalk ----------
    Gewone (niet-gelaagde) CSS wint van de Tailwind-utilities, dus hier kan de mobiele opmaak overschreven worden. */
+/* Bibliotheek: 7 lijsten in 3 kolommen, de laatste (Gestopt) als brede rij */
+.lib-tiles > :last-child { grid-column: 1 / -1; aspect-ratio: auto; flex-direction: row; align-items: center; gap: 12px; }
+
 @media (min-width: 1024px) {
   :root { --side: 240px; --gutter: 32px; }
   body > .flex { padding-left: var(--side); }
@@ -122,7 +125,8 @@
   .row-scroller::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
 
   #listView, #folderBody { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); column-gap: 16px; row-gap: 20px; }
-  .lib-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); max-width: 1100px; }
+  .lib-tiles { grid-template-columns: repeat(7, minmax(0, 1fr)); max-width: 1200px; }
+  .lib-tiles > :last-child { grid-column: auto; aspect-ratio: 1 / .85; flex-direction: column; align-items: stretch; }
   .home-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   #libraryView > :not(.lib-tiles), #moreView > * { max-width: 720px; }
 
