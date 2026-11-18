@@ -11,6 +11,8 @@
   <meta name="apple-mobile-web-app-title" content="Game List">
   <link rel="icon" href="/icons/icon.svg?v=2" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=3">
+  <!-- Web-app op het beginscherm (zoals Ionic's plt-pwa): zie html.standalone in style.css. Vóór het tekenen, anders verspringt het -->
+  <script>if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) document.documentElement.classList.add('standalone');</script>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -38,7 +40,7 @@
     </header>
 
     <!-- Home -->
-    <main id="homeView" class="view pb-grid no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4" hidden></main>
+    <main id="homeView" class="view pb-under-tabs no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4" hidden></main>
 
     <!-- Lijsten binnen de Bibliotheek -->
     <main id="listView" class="view pb-grid no-scrollbar grid flex-1 grid-cols-3 content-start gap-x-2.5 gap-y-3.5 overflow-y-auto overscroll-contain px-4 pt-1 sm:grid-cols-5" hidden></main>

@@ -79,12 +79,22 @@
 }
 
 @layer base {
-  /* App-gevoel: pagina scrollt, stuitert en zoomt niet */
-  /* Geen position: fixed op html/body: daarmee maakt iOS het scherm van een web-app op het beginscherm
-     te kort (strook onder de tabbalk). Zoals in bird-list: gewoon de hoogte van het scherm (dvh). */
-  html, body {
+  /* App-gevoel: pagina scrollt, stuitert en zoomt niet.
+     Opbouw zoals Ionic (structure.css, gebruikt in bird-list), omdat iOS in web-apps op het beginscherm
+     anders met een te kort scherm rekent (tabbalk zweeft boven een strook of valt eraf):
+     - html is 100% hoog, in de web-app 100vh (= het volledige scherm, Ionic: html.plt-pwa)
+     - body is fixed en vult html; transform maakt de body het referentiekader voor alles wat
+       position: fixed is (tabbalk, schermen, meldingen), in plaats van het verkeerd berekende scherm */
+  html { height: 100%; }
+  html.standalone { height: 100vh; }
+  body {
+    position: fixed;
+    width: 100%;
     height: 100%;
-    height: 100dvh;
+    max-height: 100%;
+    transform: translateZ(0);
+  }
+  html, body {
     margin: 0;
     overflow: hidden;
     overscroll-behavior: none;

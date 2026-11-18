@@ -666,7 +666,7 @@ function renderHome() {
       + rowScroller(nintendoUpcoming.map(e => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || '' })).join('')) : ''}
     ${top.length ? homeHead('Mijn hoogste cijfers') + rowScroller(top.map(g => cardHTML(g)).join('')) : ''}
     ${lastFinished.length ? homeHead('Laatst uitgespeeld', 'data-tab="finished"') + rowScroller(lastFinished.map(g => cardHTML(g, { sub: g.finishedAt ? formatRelease(g.finishedAt) : '' })).join('')) : ''}
-    <div class="mt-6 text-center text-[12px] text-muted">${games.length} games in je verzameling${average(games) ? ` · gemiddeld cijfer ${average(games)}` : ''}</div>
+    <div class="mt-6 text-center text-[12px] text-muted">${games.length} ${games.length === 1 ? 'game' : 'games'} in je verzameling${average(games) ? ` · gemiddeld cijfer ${average(games)}` : ''}</div>
   `;
   el.scrollTop = keepScroll;
   onHomeScroll();
@@ -2104,9 +2104,6 @@ $('#clearSearch').addEventListener('click', () => { $('#searchInput').value = ''
 const detailOpen = () => !$('#detailScreen').hidden;
 window.addEventListener('online', () => { enrichOwned(); render(); if (detailOpen()) { renderDetail(); loadDetails(); } });
 window.addEventListener('offline', () => { render(); if (detailOpen()) renderDetail(); });
-
-// Na het toetsenbord laat iOS de pagina soms een stukje verschoven staan: terugzetten
-document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement?.matches?.('input, textarea, [contenteditable="true"]')) window.scrollTo(0, 0); }, 100));
 
 // Pinch-zoom blokkeren (iOS negeert user-scalable=no soms).
 // Dubbeltik-zoom staat uit via `touch-action: manipulation` in de CSS.
