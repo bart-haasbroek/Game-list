@@ -1560,6 +1560,15 @@ function scoresHTML(critic, playtime, title) {
   </div>`;
 }
 
+// Datumveld: iOS geeft een datumveld een eigen minimale breedte (loopt dan uit zijn kolom) en
+// toont niks als het leeg is; daarom min-w-0, links uitgelijnd en "Kies datum" als het leeg is
+const dateField = (key, text, value) => `<label class="min-w-0 text-xs text-muted">${text}
+  <span class="relative mt-1 block">
+    <input type="date" data-date="${key}" value="${value || ''}" required
+      class="peer block h-11 w-full min-w-0 appearance-none rounded-[10px] bg-surface px-3 text-left text-[15px] text-ink [&::-webkit-date-and-time-value]:text-left [&:invalid:not(:focus)::-webkit-datetime-edit]:opacity-0">
+    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[15px] text-muted peer-valid:hidden peer-focus:hidden">Kies datum</span>
+  </span></label>`;
+
 function renderDetail() {
   const v = viewOf(currentRef);
   if (!v) return;
@@ -1690,10 +1699,7 @@ function renderDetail() {
     ${g.status === 'playing' || DONE.includes(g.status) || g.startedAt || g.finishedAt ? `
     <div class="mt-6">
       ${label('Datums')}
-      <div class="flex gap-2.5">
-        <label class="flex-1 text-xs text-muted">Begonnen<input type="date" data-date="startedAt" value="${g.startedAt || ''}" class="mt-1 block min-h-10 w-full rounded-[10px] bg-surface px-2.5 py-2 text-ink"></label>
-        <label class="flex-1 text-xs text-muted">Uitgespeeld<input type="date" data-date="finishedAt" value="${g.finishedAt || ''}" class="mt-1 block min-h-10 w-full rounded-[10px] bg-surface px-2.5 py-2 text-ink"></label>
-      </div>
+      <div class="grid grid-cols-2 gap-2.5">${dateField('startedAt', 'Begonnen', g.startedAt)}${dateField('finishedAt', 'Uitgespeeld', g.finishedAt)}</div>
     </div>` : ''}
 ` : ''}
 
