@@ -12,6 +12,7 @@ import { loadHltb, hltbFor } from './hltb.js';
 import { mountNotes, destroyNotes, notesPreviewHTML, notesText, preloadNotes } from './notes.js';
 
 const APP_VERSION = '3.1.0';
+document.documentElement.setAttribute('data-version', APP_VERSION); // voor de foutmeldingen (index.html)
 const COVER_CACHE = 'covers-v2';
 
 // ---------- Iconen ----------
@@ -806,10 +807,10 @@ async function loadFranchiseArt(root) {
 }
 
 function discoverHomeHTML() {
-  const up = upcoming(300).filter(byPlatform).slice(0, 20);
-  // Met platformfilter: aantallen per franchise opnieuw tellen en lege franchises weglaten
-  const fr = platformFilterOn()
-    ? franchiseList().map(f => ({ ...f, count: franchiseGames(f.name).filter(byPlatform).length })).filter(f => f.count > 0)
+  const up = upcoming(300).filter(byFilter).slice(0, 20);
+  // Met filter: aantallen per franchise opnieuw tellen en lege franchises weglaten
+  const fr = filterOn()
+    ? franchiseList().map(f => ({ ...f, count: franchiseGames(f.name).filter(byFilter).length })).filter(f => f.count > 0)
     : franchiseList();
   const tile = (f) => {
     const e = franchiseCover(f.name);
@@ -850,12 +851,12 @@ function resultRow(g, key) {
 function discoverResultsHTML(q) {
   const nq = normalize(q);
   const folders = franchiseList().filter(f => normalize(f.name).includes(nq) || nq.includes(normalize(f.name))).slice(0, 4);
-  const local = searchDataset(q).filter(byPlatform);
+  const local = searchDataset(q).filter(byFilter);
   let html = filterNoteHTML() + folders.map(f => `<button data-franchise="${esc(f.name)}" class="mb-2 flex w-full items-center gap-3 rounded-xl bg-surface p-3 text-left [&_svg]:text-accent">
       ${ICONS.folder}<div class="flex-1"><div class="font-semibold">${esc(f.name)}</div><div class="text-[12px] text-muted">${f.count} games</div></div>${ICONS.chevron}</button>`).join('');
 
   if (onlineResults && onlineResults.q === q) {
-    const list = onlineResults.items.filter(r => !r.platforms?.length || r.platforms.some(p => NINTENDO_RE.test(p.name || p))).filter(byPlatform);
+    const list = onlineResults.items.filter(r => !r.platforms?.length || r.platforms.some(p => NINTENDO_RE.test(p.name || p))).filter(byFilter);
     html += `<div class="pb-1 pt-1 text-[11px] text-muted">Online gezocht via ${SOURCE_NAMES[onlineSource]}</div>`;
     html += list.length ? list.map(r => resultRow(r, r.key)).join('') : notice('Ook online niks gevonden.');
   } else {
@@ -918,10 +919,13 @@ function setFolderMeta(text) {
 
 function drawFolder() {
   const { title, allItems, meta: givenMeta, opts: { owned = false, split = false, sub = null } } = folderState;
-  const items = allItems.filter(byPlatform);
-  const meta = givenMeta && platformFilterOn() ? `${items.length} van ${allItems.length} · ${prefs.platforms.join(', ')}` : givenMeta;
+  // Eigen lijsten: alleen platform; franchise-/ontdekmappen ook 'verbergen'
+  const items = allItems.filter(owned ? byPlatform : byFilter);
+  const active = owned ? platformFilterOn() : filterOn();
+  const ftext = owned ? prefs.platforms.join(', ') : filterText();
+  const meta = givenMeta && active ? `${items.length} van ${allItems.length} · ${ftext}` : givenMeta;
   $('#folderTitle').textContent = title;
-  const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}${platformFilterOn() ? ` · ${prefs.platforms.join(', ')}` : ''}`;
+  const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}${active ? ` · ${ftext}` : ''}`;
   // Onder de titel het platform waarop je filtert (anders het eerste platform van de game)
   const plat = (e) => (platformFilterOn() && platformsOf(e).find(p => prefs.platforms.includes(p))) || e.platforms?.[0];
   const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: sub?.(e) ?? [plat(e), e.year].filter(Boolean).join(' · ') });
@@ -936,10 +940,10 @@ function drawFolder() {
     body.innerHTML = head('Nog niet verschenen', soon.length) + soon.map(soonCard).join('')
       + (out.length ? head('Verschenen', out.length, 'mt-3') + out.map(card).join('') : '');
     // Aantallen staan al bij de kopjes; alleen een filter-/eigen regel tonen
-    setFolderMeta(givenMeta || platformFilterOn() ? meta ?? count : '');
+    setFolderMeta(givenMeta || active ? meta ?? count : '');
   } else {
     body.innerHTML = items.length ? items.map(card).join('')
-      : `<div class="col-span-full">${notice(`Geen games op ${esc(prefs.platforms.join(', '))}.<small><button data-filter-clear class="font-semibold text-accent">Filter wissen</button></small>`)}</div>`;
+      : `<div class="col-span-full">${notice(`Geen games met dit filter (${esc(ftext)}).<small><button data-filter-clear class="font-semibold text-accent">Filter wissen</button></small>`)}</div>`;
     setFolderMeta(meta ?? count);
   }
   hydrate(body);
@@ -965,21 +969,39 @@ const platformFilterOn = () => prefs.platforms.length > 0;
 const platformsOf = (e) => (e.myPlatforms?.length ? e.myPlatforms : e.platforms || [])
   .map(p => { const s = shortPlatform(p); return PLATFORM_GROUP[s] || s; });
 const byPlatform = (e) => !platformFilterOn() || platformsOf(e).some(p => prefs.platforms.includes(p));
-const filterNoteHTML = () => platformFilterOn()
-  ? `<div class="mb-3 flex items-center gap-2 text-[13px] text-muted">Alleen <b class="truncate text-ink">${esc(prefs.platforms.join(', '))}</b>
+
+// Verbergen wat je al hebt gespeeld of in je bibliotheek hebt (bewaard in prefs.hide)
+const HIDE_OPTS = [
+  { id: 'played', label: 'Al gespeeld', short: 'zonder gespeelde', statuses: ['playing', 'finished', 'completed', 'stopped'] },
+  { id: 'owned', label: 'Al in bibliotheek', short: 'zonder mijn games', statuses: null },
+];
+if (!Array.isArray(prefs.hide)) prefs.hide = [];
+const hiddenByMe = (e) => {
+  if (!prefs.hide.length) return false;
+  const rec = ownedBy(e.key);
+  return !!rec && HIDE_OPTS.some(o => prefs.hide.includes(o.id) && (!o.statuses || o.statuses.includes(rec.status)));
+};
+const filterOn = () => platformFilterOn() || prefs.hide.length > 0;
+// Platform én verbergen (Ontdek en franchisemappen; niet je eigen lijsten)
+const byFilter = (e) => byPlatform(e) && !hiddenByMe(e);
+// Korte omschrijving van het filter, bv. "Switch, Switch 2 · zonder gespeelde"
+const filterText = () => [prefs.platforms.join(', '), ...HIDE_OPTS.filter(o => prefs.hide.includes(o.id)).map(o => o.short)].filter(Boolean).join(' · ');
+const filterNoteHTML = () => filterOn()
+  ? `<div class="mb-3 flex items-center gap-2 text-[13px] text-muted"><span class="truncate">Filter: <b class="text-ink">${esc(filterText())}</b></span>
       <button data-filter-clear class="ml-auto flex-none font-semibold text-accent">Wissen</button></div>` : '';
 
 function updateFilterButtons() {
   for (const b of document.querySelectorAll('[data-platform-filter]')) {
-    b.setAttribute('aria-pressed', platformFilterOn());
+    b.setAttribute('aria-pressed', filterOn());
     const c = b.querySelector('[data-filter-count]');
-    c.hidden = !platformFilterOn();
-    c.textContent = prefs.platforms.length;
+    c.hidden = !filterOn();
+    c.textContent = prefs.platforms.length + prefs.hide.length;
   }
 }
 
-function setPlatforms(list) {
+function setPlatforms(list, hide = prefs.hide) {
   prefs.platforms = FILTER_PLATFORMS.filter(p => list.includes(p)); // vaste volgorde
+  prefs.hide = HIDE_OPTS.map(o => o.id).filter(id => hide.includes(id));
   savePrefs();
   updateFilterButtons();
   if (!$('#folderScreen').hidden && folderState) drawFolder();
@@ -994,10 +1016,16 @@ function renderPopover() {
     return `<button data-pf="${esc(p)}" role="menuitemcheckbox" aria-checked="${on}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] font-semibold active:bg-surface ${on ? 'text-ink' : 'text-muted'}">
       <span class="grid size-5 flex-none place-items-center rounded-md ${on ? 'bg-accent text-white' : 'ring-2 ring-line ring-inset'} [&_svg]:size-3.5 [&_svg]:stroke-[3.5]">${on ? svg('<path d="M20 6 9 17l-5-5"/>') : ''}</span>${esc(p)}</button>`;
   };
-  pop.innerHTML = `<div class="flex items-center justify-between px-3 pb-1 pt-1.5">
-      <b class="text-[13px] uppercase tracking-wider text-muted">Platform</b>
-      ${platformFilterOn() ? '<button data-filter-clear class="text-[13px] font-semibold text-accent">Alles tonen</button>' : ''}
-    </div>${FILTER_PLATFORMS.map(row).join('')}`;
+  const hideRow = (o) => {
+    const on = prefs.hide.includes(o.id);
+    return `<button data-hide="${o.id}" role="menuitemcheckbox" aria-checked="${on}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] font-semibold active:bg-surface ${on ? 'text-ink' : 'text-muted'}">
+      <span class="grid size-5 flex-none place-items-center rounded-md ${on ? 'bg-accent text-white' : 'ring-2 ring-line ring-inset'} [&_svg]:size-3.5 [&_svg]:stroke-[3.5]">${on ? svg('<path d="M20 6 9 17l-5-5"/>') : ''}</span>${esc(o.label)}</button>`;
+  };
+  const head = (t, extra = '') => `<div class="flex items-center justify-between px-3 pb-1 pt-1.5"><b class="text-[13px] uppercase tracking-wider text-muted">${t}</b>${extra}</div>`;
+  pop.innerHTML = head('Verbergen', filterOn() ? '<button data-filter-clear class="text-[13px] font-semibold text-accent">Alles tonen</button>' : '')
+    + HIDE_OPTS.map(hideRow).join('')
+    + '<div class="mx-3 my-1.5 h-px bg-line"></div>'
+    + head('Platform') + FILTER_PLATFORMS.map(row).join('');
 }
 
 function openPopover(btn) {
@@ -1029,7 +1057,13 @@ document.addEventListener('click', (e) => {
     setPlatforms(prefs.platforms.includes(p) ? prefs.platforms.filter(x => x !== p) : [...prefs.platforms, p]);
     return;
   }
-  if (e.target.closest('[data-filter-clear]')) { setPlatforms([]); return; }
+  const hd = e.target.closest('[data-hide]');
+  if (hd) {
+    const id = hd.dataset.hide;
+    setPlatforms(prefs.platforms, prefs.hide.includes(id) ? prefs.hide.filter(x => x !== id) : [...prefs.hide, id]);
+    return;
+  }
+  if (e.target.closest('[data-filter-clear]')) { setPlatforms([], []); return; }
   if ($('#popover') && !e.target.closest('#popover')) closePopover();
 }, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopover(); });
@@ -1144,8 +1178,8 @@ function renderSwipe() {
       <p class="mt-1 text-[13px] text-muted">${total ? `${swipe.yes} uitgespeeld, ${swipe.part} gespeeld, ${swipe.no} niet gespeeld.` : 'Alle games staan al in je bibliotheek of zijn al langsgekomen.'}</p>
       <div class="mt-5 flex flex-col gap-2">
         <button data-swipe-pickers class="rounded-full bg-accent px-5 py-2.5 font-bold text-white">Andere franchise</button>
-        ${swipe.yes ? `<button data-tab="finished" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk Uitgespeeld</button>` : ''}
-        ${swipe.part ? `<button data-tab="stopped" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk Gestopt</button>` : ''}
+        ${swipe.yes ? `<button data-swipe-show="yes" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk ${swipe.yes} uitgespeeld</button>` : ''}
+        ${swipe.part ? `<button data-swipe-show="up" class="rounded-full bg-surface-2 px-5 py-2.5 font-semibold">Bekijk ${swipe.part} gespeeld</button>` : ''}
       </div>
       ${history.length ? `<div class="mt-6">${undo}</div>` : ''}
     </div>`;
@@ -1260,6 +1294,16 @@ function swipeDecide(choice) {
   }, 320);
 }
 
+// Na het swipen: precies de games die je net als uitgespeeld ('yes') of gespeeld ('up') hebt gemarkeerd
+function showSwiped(choice) {
+  const ids = new Set(swipe.history.filter(h => h.choice === choice && h.id).map(h => h.id));
+  const list = games.filter(g => ids.has(g.id));
+  const yes = choice === 'yes';
+  hideScreen($('#swipeScreen'), { animate: false });
+  openFolder(`${swipeName(swipe.set)}: ${yes ? 'uitgespeeld' : 'gespeeld'}`, list,
+    `${list.length} ${list.length === 1 ? 'game' : 'games'} · ${yes ? 'staan in Uitgespeeld' : 'niet uitgespeeld, staan in Gestopt'}`, { owned: true });
+}
+
 function swipeUndo() {
   const h = swipe.history.pop();
   if (!h || swipe.busy) return;
@@ -1282,6 +1326,38 @@ $('#swipeBack').addEventListener('click', () => {
 });
 
 // ---------- Meer ----------
+// Foutmeldingen die index.html heeft opgevangen (op de iPhone is er geen console)
+const loadErrors = () => store.load('gl.errors', []);
+function errorsHTML() {
+  const list = loadErrors();
+  if (!list.length) return '';
+  const when = (t) => new Date(t).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return `<div>
+    ${label(`Foutmeldingen (${list.length})`)}
+    <div class="overflow-hidden rounded-2xl bg-surface">
+      ${list.slice(0, 5).map(e => `<div class="border-b border-line px-4 py-3 last:border-0">
+        <div class="text-[12px] text-muted">${esc(when(e.t))}${e.v ? ` · versie ${esc(e.v)}` : ''}</div>
+        <div class="mt-0.5 select-text break-words text-[13px] font-semibold">${esc(e.m)}</div>
+      </div>`).join('')}
+    </div>
+    <div class="mt-2 grid grid-cols-2 gap-2">
+      <button data-errors-copy class="rounded-xl bg-accent p-3 font-bold text-white">Kopiëren</button>
+      <button data-errors-clear class="rounded-xl bg-surface-2 p-3 font-semibold">Wissen</button>
+    </div>
+    <p class="mt-1.5 text-[12px] text-muted">Kopieer en plak dit in een bericht, dan is te zien wat er misging.</p>
+  </div>`;
+}
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-errors-copy]')) {
+    const text = JSON.stringify(loadErrors(), null, 2);
+    try { await navigator.clipboard.writeText(text); toast('Foutmeldingen gekopieerd'); }
+    catch { toast('Kopiëren lukte niet'); }
+  } else if (e.target.closest('[data-errors-clear]')) {
+    store.save('gl.errors', []);
+    renderIfMore();
+  }
+});
+
 function renderMore() {
   setHeader('Meer');
   showView('moreView');
@@ -1345,6 +1421,7 @@ function renderMore() {
         <button id="importBtn" class="rounded-xl bg-surface-2 p-3.5 font-bold">Importeren</button>
       </div>
     </div>
+    ${errorsHTML()}
     <div class="text-center text-[12px] leading-relaxed text-muted">
       Gegevens: IGDB · omschrijvingen: Wikipedia (CC BY-SA)<br>
       <span id="storageInfo" class="block empty:hidden"></span>
@@ -1577,11 +1654,12 @@ function scoresHTML(critic, playtime, title) {
 }
 
 // Datumveld: iOS geeft een datumveld een eigen minimale breedte (loopt dan uit zijn kolom) en
-// toont niks als het leeg is; daarom min-w-0, links uitgelijnd en "Kies datum" als het leeg is
+// toont niks als het leeg is; daarom min-w-0, links uitgelijnd en "Kies datum" als het leeg is.
+// leading-[44px] (= de veldhoogte): anders zet iOS de datum bovenin het veld (getest in de iOS-simulator)
 const dateField = (key, text, value) => `<label class="min-w-0 text-xs text-muted">${text}
   <span class="relative mt-1 block">
     <input type="date" data-date="${key}" value="${value || ''}" required
-      class="peer block h-11 w-full min-w-0 appearance-none rounded-[10px] bg-surface px-3 text-left text-[15px] text-ink [&::-webkit-date-and-time-value]:text-left [&:invalid:not(:focus)::-webkit-datetime-edit]:opacity-0">
+      class="peer block h-11 w-full min-w-0 appearance-none rounded-[10px] bg-surface px-3 text-left text-[15px] leading-[44px] text-ink [&::-webkit-date-and-time-value]:m-0 [&::-webkit-date-and-time-value]:text-left [&:invalid:not(:focus)::-webkit-datetime-edit]:opacity-0">
     <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[15px] text-muted peer-valid:hidden peer-focus:hidden">Kies datum</span>
   </span></label>`;
 
@@ -2142,6 +2220,8 @@ document.addEventListener('click', (e) => {
   const pickSet = e.target.closest('[data-swipe-pick]');
   if (pickSet) { startSwipe(pickSet.dataset.swipePick); return; }
   if (e.target.closest('[data-swipe-pickers]')) { renderSwipePicker(); return; }
+  const show = e.target.closest('[data-swipe-show]');
+  if (show) { showSwiped(show.dataset.swipeShow); return; }
   if (e.target.closest('[data-swipe-yes]')) { swipeDecide('yes'); return; }
   if (e.target.closest('[data-swipe-up]')) { swipeDecide('up'); return; }
   if (e.target.closest('[data-swipe-no]')) { swipeDecide('no'); return; }

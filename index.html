@@ -13,6 +13,55 @@
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=3">
   <!-- Web-app op het beginscherm (zoals Ionic's plt-pwa): zie html.standalone in style.css. Vóór het tekenen, anders verspringt het -->
   <script>if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) document.documentElement.classList.add('standalone');</script>
+  <!-- Foutmeldingen opvangen (ook als de app zelf niet start): bewaard in localStorage 'gl.errors', te zien onder
+       Meer > Foutmeldingen, met een balk bovenin om te herladen. Handig op de iPhone, waar je geen console hebt. -->
+  <script>
+  (function () {
+    var KEY = 'gl.errors', bar = null;
+    function save(msg, stack) {
+      try {
+        var list = JSON.parse(localStorage.getItem(KEY) || '[]');
+        list.unshift({ t: new Date().toISOString(), m: String(msg).slice(0, 300), s: String(stack || '').slice(0, 1200),
+          v: document.documentElement.getAttribute('data-version') || '', ua: navigator.userAgent });
+        localStorage.setItem(KEY, JSON.stringify(list.slice(0, 20)));
+      } catch (e) {}
+      show(msg);
+    }
+    function show(msg) {
+      if (!document.body) return document.addEventListener('DOMContentLoaded', function () { show(msg); });
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.setAttribute('role', 'alert');
+        bar.style.cssText = 'position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 8px);z-index:9999;' +
+          'background:#2a1418;color:#fff;border:1px solid #ff3c4c66;border-radius:16px;padding:12px 14px;font:600 14px -apple-system,system-ui,sans-serif;' +
+          'box-shadow:0 10px 30px rgba(0,0,0,.5)';
+        bar.innerHTML = '<div>Er ging iets mis in de app.</div><div data-m style="font-weight:400;font-size:12px;opacity:.75;margin:4px 0 10px;word-break:break-word"></div>' +
+          '<button data-r style="background:#ff3c4c;color:#fff;border:0;border-radius:10px;padding:8px 14px;font:inherit">Herladen</button> ' +
+          '<button data-c style="background:#ffffff1f;color:#fff;border:0;border-radius:10px;padding:8px 14px;font:inherit;margin-left:6px">Sluiten</button>' +
+          '<div style="font-weight:400;font-size:11px;opacity:.6;margin-top:8px">Details staan onder Meer &gt; Foutmeldingen.</div>';
+        bar.querySelector('[data-r]').onclick = function () { location.reload(); };
+        bar.querySelector('[data-c]').onclick = function () { bar.remove(); bar = null; };
+        document.body.appendChild(bar);
+      }
+      bar.querySelector('[data-m]').textContent = String(msg).slice(0, 200);
+    }
+    addEventListener('error', function (e) {
+      var t = e.target;
+      if (t && t !== window) {
+        if (t.tagName === 'SCRIPT') save('Laden mislukt: ' + (t.src || 'script'), ''); // bv. een app-onderdeel dat niet (meer) bestaat
+        return; // kapotte plaatjes e.d. negeren
+      }
+      if (/ResizeObserver loop/.test(e.message || '')) return;
+      save(e.message || 'Onbekende fout', e.error && e.error.stack);
+    }, true);
+    addEventListener('unhandledrejection', function (e) {
+      var r = e.reason;
+      if (r && r.name === 'AbortError') return; // afgebroken zoekopdracht e.d.
+      save((r && r.message) || r || 'Onbekende fout', r && r.stack);
+    });
+    window.__logError = save;
+  })();
+  </script>
   <script type="module" src="/src/main.js"></script>
 </head>
 <body>
@@ -56,7 +105,7 @@
           <input id="searchInput" type="search" placeholder="Zoeken in games…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" class="min-w-0 flex-1 bg-transparent outline-none">
           <button id="clearSearch" class="text-muted" aria-label="Wissen" hidden><svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
-        <button id="discoverFilter" data-platform-filter aria-label="Filter op platform" aria-haspopup="dialog" class="relative grid size-[42px] flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
+        <button id="discoverFilter" data-platform-filter aria-label="Filter" aria-haspopup="dialog" class="relative grid size-[42px] flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
           <svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
           <span data-filter-count class="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white" hidden></span>
         </button>
@@ -97,7 +146,7 @@
       </button>
       <h2 id="folderTitle" class="min-w-0 flex-1 truncate text-[22px] font-bold tracking-tight"></h2>
       <button id="folderSwipe" class="ml-1 flex-none rounded-full bg-accent/15 px-3 py-1.5 text-[13px] font-semibold text-accent" hidden>Wat heb ik gespeeld?</button>
-      <button id="folderFilter" data-platform-filter aria-label="Filter op platform" aria-haspopup="dialog" class="relative grid ml-2 size-9 flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
+      <button id="folderFilter" data-platform-filter aria-label="Filter" aria-haspopup="dialog" class="relative grid ml-2 size-9 flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
           <svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
           <span data-filter-count class="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white" hidden></span>
         </button>
