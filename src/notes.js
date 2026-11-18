@@ -1,4 +1,4 @@
-// Notities per game: WYSIWYG-editor met Tiptap (kopjes, lijsten, afvinklijstjes voor je voortgang).
+// Notities per game: WYSIWYG-editor met Tiptap (kop/subkop/tussenkop, lijsten, afvinklijstjes voor je voortgang).
 // Tiptap wordt pas geladen als je een eigen game opent, zodat de app snel blijft starten.
 
 let editor = null;   // actieve editor
@@ -18,7 +18,10 @@ export const notesText = (notes) => toHTML(notes).replace(/<[^>]+>/g, ' ').repla
 
 const I = (d) => `<svg viewBox="0 0 24 24" class="size-[18px]!">${d}</svg>`;
 const TOOLS = [
-  { cmd: 'h2', title: 'Kopje', html: '<b class="text-[14px]">H</b>', active: e => e.isActive('heading', { level: 2 }), run: c => c.toggleHeading({ level: 2 }) },
+  { cmd: 'h1', title: 'Kop', html: '<b class="text-[14px]">H<sub class="text-[10px]">1</sub></b>', active: e => e.isActive('heading', { level: 1 }), run: c => c.toggleHeading({ level: 1 }) },
+  { cmd: 'h2', title: 'Subkop', html: '<b class="text-[14px]">H<sub class="text-[10px]">2</sub></b>', active: e => e.isActive('heading', { level: 2 }), run: c => c.toggleHeading({ level: 2 }) },
+  { cmd: 'h3', title: 'Tussenkop', html: '<b class="text-[14px]">H<sub class="text-[10px]">3</sub></b>', active: e => e.isActive('heading', { level: 3 }), run: c => c.toggleHeading({ level: 3 }) },
+  { cmd: 'p', title: 'Gewone tekst', html: '<span class="text-[16px]">¶</span>', active: e => e.isActive('paragraph') && !e.isActive('bulletList') && !e.isActive('orderedList') && !e.isActive('taskList'), run: c => c.setParagraph(), sep: true },
   { cmd: 'bold', title: 'Vet', html: '<b class="text-[15px]">B</b>', active: e => e.isActive('bold'), run: c => c.toggleBold() },
   { cmd: 'italic', title: 'Cursief', html: '<i class="font-serif text-[16px]">I</i>', active: e => e.isActive('italic'), run: c => c.toggleItalic() },
   { cmd: 'strike', title: 'Doorhalen', html: '<s class="text-[15px]">S</s>', active: e => e.isActive('strike'), run: c => c.toggleStrike() },
@@ -69,7 +72,7 @@ export async function mountNotes(mount, id, notes, onChange) {
   wrapper.innerHTML = `
     <div class="no-scrollbar flex gap-0.5 overflow-x-auto border-b border-line p-1.5">
       ${TOOLS.map(t => `<button type="button" data-cmd="${t.cmd}" title="${t.title}" aria-label="${t.title}"
-        class="grid h-9 min-w-9 flex-none place-items-center rounded-lg px-1.5 text-ink active:bg-surface-2 disabled:opacity-30 ${t.cmd === 'undo' ? 'ml-auto' : ''}">${t.html}</button>`).join('')}
+        class="grid h-9 min-w-9 flex-none place-items-center rounded-lg px-1.5 text-ink active:bg-surface-2 disabled:opacity-30 ${t.cmd === 'undo' ? 'ml-auto' : ''}">${t.html}</button>${t.sep ? '<span class="mx-1 my-1.5 w-px flex-none bg-line"></span>' : ''}`).join('')}
     </div>
     <div data-editor></div>`;
   // Toolbar: mousedown voorkomen zodat de cursor in de tekst blijft staan
@@ -85,7 +88,7 @@ export async function mountNotes(mount, id, notes, onChange) {
   editor = new Editor({
     element: wrapper.querySelector('[data-editor]'),
     extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3] }, codeBlock: false, code: false }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, code: false }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder: 'Voortgang, tips, waar je gebleven bent… Gebruik het afvinklijstje voor je doelen.' }),
