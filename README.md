@@ -12,7 +12,8 @@ Gebouwd met Vite, Tailwind CSS v4 en vite-plugin-pwa. Packagemanager: yarn.
 - **Meer**: binnenkort, handmatig toevoegen, statistieken, back-up.
 
 Per game: info-pagina met releasedatum, platforms, ontwikkelaar, uitgever, genre, Nederlandse omschrijving,
-trailer (YouTube in een popup), cijfer 0–10, eigen platform, datums en notities.
+trailer (YouTube in een popup), cijfer 0–10, eigen platform, datums en notities
+(WYSIWYG met Tiptap: kopjes, lijsten en afvinklijstjes om je voortgang bij te houden).
 
 ## Lokaal draaien
 ```bash

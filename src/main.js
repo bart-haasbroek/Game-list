@@ -7,6 +7,7 @@ import {
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
 import { loadExtras, extrasFor } from './extras.js';
+import { mountNotes, detachNotes, destroyNotes } from './notes.js';
 
 const APP_VERSION = '3.0.0';
 const COVER_CACHE = 'covers-v2';
@@ -996,6 +997,7 @@ function viewOf(ref) {
 
 function openDetail(ref) {
   currentRef = ref;
+  destroyNotes(); // elke keer vers, met de opgeslagen notities
   renderDetail();
   showScreen($('#detailScreen'));
   $('#detailBody').scrollTop = 0;
@@ -1105,6 +1107,7 @@ function renderDetail() {
   const critic = info?.critic || extra?.critic;
   const playtime = info?.playtime || extra?.playtime;
 
+  detachNotes(); // editor bewaren, niet opnieuw maken (anders verlies je de cursor tijdens het typen)
   $('#detailBody').innerHTML = `
     <div class="flex items-end gap-4">
       ${coverHTML(g, { cls: 'w-[120px] flex-none' })}
@@ -1134,6 +1137,8 @@ function renderDetail() {
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
+    ${owned ? `<div class="mt-6">${label('Notities & voortgang')}<div id="notesMount"></div></div>` : ''}
+
     ${owned ? `
     <div class="mt-6">
       ${label('Mijn cijfer')}
@@ -1156,11 +1161,7 @@ function renderDetail() {
         <label class="flex-1 text-xs text-muted">Uitgespeeld<input type="date" data-date="finishedAt" value="${g.finishedAt || ''}" class="mt-1 block min-h-10 w-full rounded-[10px] bg-surface px-2.5 py-2 text-ink"></label>
       </div>
     </div>` : ''}
-
-    <div class="mt-6">
-      ${label('Notities')}
-      <textarea id="notes" placeholder="Wat vind je ervan?" class="min-h-[90px] w-full resize-none rounded-xl bg-surface p-3 outline-none">${esc(g.notes)}</textarea>
-    </div>` : ''}
+` : ''}
 
     <div class="mt-6">
       ${label('Over deze game')}
@@ -1180,6 +1181,13 @@ function renderDetail() {
 
     ${g.wikiTitle || g.nlTitle ? `<a href="https://${g.nlTitle ? 'nl' : 'en'}.wikipedia.org/wiki/${encodeURIComponent((g.nlTitle || g.wikiTitle).replace(/ /g, '_'))}" target="_blank" rel="noopener" class="mt-5 block text-center text-[12px] text-muted underline">Lees meer op Wikipedia</a>` : ''}
   `;
+  if (owned) {
+    const id = g.id;
+    mountNotes($('#notesMount'), id, g.notes, (html) => {
+      const rec = games.find(x => x.id === id);
+      if (rec) { rec.notes = html; rec.updatedAt = Date.now(); saveGames(); }
+    });
+  } else destroyNotes();
   hydrate($('#detailBody')).then(() => {
     const img = $('#detailBody img[src]');
     if (img && !src) $('#detailBg').style.backgroundImage = `url("${img.src}")`;
@@ -1292,11 +1300,6 @@ $('#detailBody').addEventListener('change', (e) => {
   }
 });
 
-$('#detailBody').addEventListener('input', (e) => {
-  if (e.target.id !== 'notes') return;
-  const v = viewOf(currentRef);
-  if (v?.owned) { v.g.notes = e.target.value; v.g.updatedAt = Date.now(); saveGames(); }
-});
 
 $('#deleteBtn').addEventListener('click', async () => {
   const v = viewOf(currentRef);
