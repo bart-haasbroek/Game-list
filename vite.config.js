@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt': een nieuwe versie wacht tot je op 'Vernieuwen' tikt in de melding bovenin (src/main.js)
+      registerType: 'prompt',
       includeAssets: ['icons/*'],
       manifest: {
         name: 'Game List',

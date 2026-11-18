@@ -1597,12 +1597,56 @@ window.addEventListener('offline', render);
   document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
 document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
+// ---------- Nieuwe versie van de app ----------
+// Staat er een nieuwe versie klaar, dan schuift bovenin een melding in. Tik = vernieuwen.
+// Zoekt naar updates bij het openen en elke keer dat je de app weer naar voren haalt (PWA op beginscherm).
+function setupUpdates() {
+  let reg = null;
+  let lastCheck = 0;
+  const check = () => {
+    if (!reg || !online() || Date.now() - lastCheck < 60_000) return;
+    lastCheck = Date.now();
+    reg.update().catch(() => {});
+  };
+  const updateSW = registerSW({
+    immediate: true,
+    onRegisteredSW(_url, r) { reg = r || null; },
+    onNeedRefresh() { showUpdateBanner(() => updateSW(true)); },
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  setInterval(check, 30 * 60_000);
+}
+
+function showUpdateBanner(apply) {
+  if ($('#updateBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'updateBanner';
+  el.className = 'pointer-events-none fixed inset-x-0 top-0 z-[60] flex justify-center px-3 pt-[calc(env(safe-area-inset-top,0px)+8px)] transition-transform duration-300 -translate-y-[150%]';
+  el.innerHTML = `<div class="pointer-events-auto flex w-full max-w-[440px] items-center gap-3 rounded-2xl border border-white/10 bg-surface-2/95 p-2.5 pl-3.5 shadow-2xl shadow-black/60 backdrop-blur">
+    <span class="grid size-8 flex-none place-items-center rounded-full bg-accent/15 text-accent [&_svg]:size-[18px]">${svg('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>')}</span>
+    <span class="min-w-0 flex-1 leading-tight"><b class="block text-[15px]">Nieuwe versie beschikbaar</b><span class="text-[12.5px] text-muted">Tik op vernieuwen om bij te werken</span></span>
+    <button data-update-apply class="flex-none rounded-full bg-accent px-3.5 py-2 text-[14px] font-bold text-white active:scale-95">Vernieuwen</button>
+    <button data-update-close aria-label="Later" class="grid size-8 flex-none place-items-center rounded-full text-muted active:bg-white/10 [&_svg]:size-4">${svg('<path d="M18 6 6 18M6 6l12 12"/>')}</button>
+  </div>`;
+  document.body.append(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('-translate-y-[150%]')));
+  el.querySelector('[data-update-apply]').addEventListener('click', (e) => {
+    e.currentTarget.textContent = 'Bezig…';
+    apply();
+    setTimeout(() => location.reload(), 3000); // vangnet als de nieuwe versie niet vanzelf herlaadt
+  });
+  el.querySelector('[data-update-close]').addEventListener('click', () => {
+    el.classList.add('-translate-y-[150%]');
+    setTimeout(() => el.remove(), 300);
+  });
+}
+
 // ---------- Start ----------
 render();
 loadDataset().then(() => { if (prefs.tab === 'home' || prefs.tab === 'discover') render(); enrichOwned(); }).catch(() => {});
 loadExtras().then(() => { if (!$('#detailScreen').hidden) renderDetail(); });
 // Nieuwe gamedatabase binnen (wekelijkse update of de knop in Meer): opnieuw tekenen
 onDatasetUpdate(() => { render(); enrichOwned(); });
-registerSW({ immediate: true });
+setupUpdates();
 requestPersist();
 migrateCoverCache();
