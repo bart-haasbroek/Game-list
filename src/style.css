@@ -41,6 +41,8 @@
 @utility pt-safe { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); }
 @utility pb-safe { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); }
 @utility pb-tabs { padding-bottom: env(safe-area-inset-bottom, 0px); height: calc(62px + env(safe-area-inset-bottom, 0px)); }
+/* Detail- en mappagina's: de tabbalk blijft eroverheen zichtbaar, dus onderaan ruimte vrijlaten */
+@utility pb-under-tabs { padding-bottom: calc(62px + 24px + env(safe-area-inset-bottom, 0px)); }
 @utility bottom-fab { bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
 @utility pb-grid { padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 /* Notities (Tiptap) */
@@ -98,6 +100,9 @@
 @media (min-width: 1024px) {
   :root { --side: 240px; --gutter: 32px; }
   body > .flex { padding-left: var(--side); }
+  /* Detail- en mappagina's naast de zijbalk, zodat de tabs zichtbaar blijven */
+  .sub-screen { left: var(--side); }
+  .sub-screen .pb-under-tabs { padding-bottom: 48px; }
 
   #tabs {
     top: 0; bottom: 0; left: 0; right: auto; width: var(--side); height: auto;

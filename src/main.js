@@ -180,10 +180,15 @@ function imgUrl(src, w = COVER_W) {
 // Lukt de CDN-versie niet (bv. cover van een site die niet is toegestaan), dan het origineel
 const IMG_ERROR = "if(this.dataset.orig&&this.src!==this.dataset.orig){this.src=this.dataset.orig}else{this.remove()}";
 
+// Plaatjes die al eens geladen zijn: bij opnieuw tekenen meteen tonen, niet opnieuw infaden (anders flitst het)
+window.__shown = new Set();
+const shownBefore = (url) => { try { return window.__shown.has(new URL(url, location.href).href); } catch { return false; } };
+
 function coverHTML(g, { cls = '', extra = '', placeholder = true, w = COVER_W } = {}) {
   const src = coverSrc(g);
-  const imgCls = 'relative z-[1] block size-full object-cover opacity-0 transition-opacity duration-300';
-  const onload = `onload="this.style.opacity=1" onerror="${IMG_ERROR}"`;
+  const seen = src && (shownBefore(imgUrl(src, w)) || shownBefore(src)); // ook de reserve-URL (onerror)
+  const imgCls = `relative z-[1] block size-full object-cover ${seen ? '' : 'opacity-0 transition-opacity duration-300'}`;
+  const onload = `onload="this.style.opacity=1;__shown.add(this.src)" onerror="${IMG_ERROR}"`;
   const img = src ? `<img src="${esc(imgUrl(src, w))}" data-orig="${esc(src)}" alt="" loading="lazy" ${onload} class="${imgCls}">`
     : g.coverFile ? `<img data-file="${esc(g.coverFile)}" data-w="${w}" alt="" ${onload} class="${imgCls}">` : '';
   return `<div class="relative aspect-[3/4.25] overflow-hidden rounded-[10px] bg-surface-2 shadow-lg shadow-black/35 transition-transform ${cls}">
@@ -1373,8 +1378,15 @@ function renderDetail() {
   const critic = info?.critic || extra?.critic;
   const playtime = hltbFor(g.igdbId); // speeltijd van HowLongToBeat (die van IGDB is te vaak op 1 speler gebaseerd)
 
+  // Offline en de details zijn nog nooit opgehaald: zeggen wat er wel en niet is
+  const offlineNote = !info && !online() && (g.igdbId || g.qid || g.wikiTitle)
+    ? `<div class="mb-4 flex items-center gap-2.5 rounded-xl bg-surface-2 px-3.5 py-2.5 text-[13px] text-muted">
+        ${svg('<path d="M12 20h.01M8.5 16.4a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 4.2-2.7M22 8.8a15 15 0 0 0-11.9-3.7M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-1.5-1.1M2 2l20 20"/>', 'size-5! flex-none text-gold')}
+        <span><b class="text-ink">Je bent offline.</b> Beschrijving, ontwikkelaar en trailer worden opgehaald zodra je weer internet hebt.</span>
+      </div>` : '';
+
   detachNotes(); // editor bewaren, niet opnieuw maken (anders verlies je de cursor tijdens het typen)
-  $('#detailBody').innerHTML = `
+  $('#detailBody').innerHTML = `${offlineNote}
     <div class="flex items-end gap-4">
       ${coverHTML(g, { cls: 'w-[120px] flex-none' })}
       <div class="min-w-0">
@@ -1395,6 +1407,8 @@ function renderDetail() {
         : !(owned ? g.info : detailsCache.get(g.key)) && detailsFetchable(g)
         // Gegevens (met de trailer) komen nog binnen: knop wacht daarop en speelt de trailer in de app af
         ? `<button data-trailer-wait class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-ink p-3 font-bold text-bg disabled:opacity-80 [&_svg]:size-4">${ICONS.play}<span>Trailer opzoeken</span></button>`
+        : !online()
+        ? `<button disabled class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold text-muted [&_svg]:size-4">${ICONS.play}Trailer (offline)</button>`
         : `<a href="${ytSearch}" target="_blank" rel="noopener" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold [&_svg]:size-4">${ICONS.play}Zoek trailer op YouTube</a>`}
     </div>
 
@@ -1555,7 +1569,7 @@ $('#detailBody').addEventListener('click', async (e) => {
     return;
   }
   const t = e.target.closest('[data-trailer]');
-  if (t) { openTrailer(t.dataset.trailer); return; }
+  if (t) { if (online()) openTrailer(t.dataset.trailer); else toast('Je bent offline: de trailer speelt af als je weer internet hebt'); return; }
   const wait = e.target.closest('[data-trailer-wait]');
   if (wait) { waitForTrailer(wait); return; }
   const f = e.target.closest('[data-franchise]');
@@ -1854,8 +1868,9 @@ $('#searchInput').addEventListener('input', () => {
 });
 $('#searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
 $('#clearSearch').addEventListener('click', () => { $('#searchInput').value = ''; onlineResults = null; renderDiscover(); });
-window.addEventListener('online', () => { enrichOwned(); render(); });
-window.addEventListener('offline', render);
+const detailOpen = () => !$('#detailScreen').hidden;
+window.addEventListener('online', () => { enrichOwned(); render(); if (detailOpen()) { renderDetail(); loadDetails(); } });
+window.addEventListener('offline', () => { render(); if (detailOpen()) renderDetail(); });
 
 // Pinch-zoom blokkeren (iOS negeert user-scalable=no soms).
 // Dubbeltik-zoom staat uit via `touch-action: manipulation` in de CSS.
