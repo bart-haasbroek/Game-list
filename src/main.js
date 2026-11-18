@@ -1,5 +1,6 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
+import { initSync, syncNow, schedule as scheduleSync, syncCode, lastSync, syncStatus, enableSync, restoreSync, disableSync, formatCode } from './sync.js';
 import { searchIGDB, searchWikipedia, SourceUnavailable } from './sources.js';
 import {
   loadDataset, datasetInfo, getEntry, searchDataset, franchiseList, franchiseGames, franchiseCover, popularGames,
@@ -81,7 +82,32 @@ const store = {
 let games = store.load('gl.games', []);
 const prefs = Object.assign({ tab: 'home', sort: 'added' }, store.load('gl.prefs', {}));
 if (!TABS.some(t => t.id === prefs.tab)) prefs.tab = ['playing', 'backlog', 'wishlist'].includes(prefs.tab) ? 'library' : 'home';
-const saveGames = () => store.save('gl.games', games);
+// Elke wijziging krijgt een tijdstip (updatedAt) en verwijderde games worden onthouden (gl.deleted),
+// zodat de sync per game de nieuwste versie kan kiezen. `silent`: automatisch aangevulde gegevens
+// (covers, info) tellen niet als wijziging.
+let deleted = store.load('gl.deleted', {});
+const bare = (g) => JSON.stringify({ ...g, updatedAt: undefined });
+let snapshot = new Map(games.map(g => [g.id, bare(g)]));
+function saveGames({ silent = false } = {}) {
+  const now = Date.now();
+  const next = new Map();
+  let changed = false;
+  for (const g of games) {
+    const b = bare(g);
+    const prev = snapshot.get(g.id);
+    if (prev !== b) {
+      changed = true;
+      if (!silent || prev === undefined) g.updatedAt = now;
+      if (deleted[g.id]) delete deleted[g.id];
+    }
+    next.set(g.id, b);
+  }
+  for (const id of snapshot.keys()) if (!next.has(id)) { deleted[id] = now; changed = true; }
+  snapshot = next;
+  store.save('gl.games', games);
+  store.save('gl.deleted', deleted);
+  if (changed && !silent) scheduleSync();
+}
 const savePrefs = () => store.save('gl.prefs', prefs);
 
 // ---------- Helpers ----------
@@ -538,8 +564,14 @@ function renderHome() {
     </button>`;
   };
 
+  // Lege lijst en geen sync: misschien heeft Safari de gegevens gewist, dus herstellen aanbieden
+  const restoreCard = !games.length && !syncCode() ? `<button data-sync-restore class="mt-4 flex w-full items-center gap-3 rounded-2xl border border-accent/30 bg-accent/10 p-3.5 text-left active:scale-[.98]">
+      <span class="grid size-10 flex-none place-items-center rounded-full bg-accent/20 text-accent [&_svg]:size-5">${svg('<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>')}</span>
+      <span class="min-w-0 flex-1"><b class="block text-[16px]">Lijst terugzetten</b><span class="text-[12.5px] text-muted">Heb je een herstelcode? Haal je games terug.</span></span>${ICONS.chevron}</button>` : '';
+
   el.innerHTML = `
     ${heroHTML(hero)}
+    ${restoreCard}
     ${playing.length ? homeHead('Aan het spelen', 'data-tab="playing"')
       + `<div class="row-scroller play-row no-scrollbar -mx-4 flex items-start gap-2 overflow-x-auto px-3 pb-1 [&>*]:w-[148px]">${playing.map(playCard).join('')}</div>` : ''}
     ${mineUpcoming.length ? homeHead('Afteller') + `<div class="flex flex-col gap-2">${countdownRows}</div>` : ''}
@@ -776,7 +808,7 @@ const openUpcoming = () => loadDataset().then(() => {
 const SWIPE_TOP = '__top';
 const swipe = { set: null, queue: [], history: [], yes: 0, no: 0, busy: false };
 const swipedNo = new Set(store.load('gl.swipedNo', []));
-const saveSwipedNo = () => store.save('gl.swipedNo', [...swipedNo]);
+const saveSwipedNo = () => { store.save('gl.swipedNo', [...swipedNo]); scheduleSync(); };
 const swipeName = (set) => (set === SWIPE_TOP ? 'Populair' : set);
 
 function swipeCandidates(set) {
@@ -984,12 +1016,34 @@ function renderMore() {
       </div>
     </div>
     <div>
-      ${label('Back-up')}
+      ${label('Sync & herstel')}
+      ${syncCode() ? `<div class="rounded-2xl bg-surface p-4">
+        <div class="flex items-center gap-3">
+          <span id="syncDot" class="size-2.5 flex-none rounded-full bg-[#4fd18b]"></span>
+          <div class="min-w-0 flex-1"><div class="font-semibold">Sync staat aan</div><div id="syncStatus" class="text-[12px] text-muted"></div></div>
+          <button data-sync-now class="flex-none rounded-xl bg-surface-2 px-3.5 py-2 text-[14px] font-semibold">Nu syncen</button>
+        </div>
+        <p class="mt-2.5 text-[12px] text-muted">Je lijst staat ook online en is op elk toestel terug te zetten met je herstelcode.</p>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button data-sync-code class="rounded-xl bg-accent p-3 font-bold text-white">Toon herstelcode</button>
+          <button data-sync-off class="rounded-xl bg-surface-2 p-3 font-semibold">Sync uitzetten</button>
+        </div>
+      </div>` : `<div class="rounded-2xl bg-surface p-4">
+        <div class="font-semibold">Je games staan alleen op dit toestel</div>
+        <p class="mt-1 text-[12.5px] text-muted">Safari kan die gegevens na een tijd wissen. Zet sync aan: je lijst wordt dan ook online bewaard
+          en met een herstelcode zet je hem terug, ook op een ander toestel.</p>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button data-sync-on class="rounded-xl bg-accent p-3 font-bold text-white">Sync aanzetten</button>
+          <button data-sync-restore class="rounded-xl bg-surface-2 p-3 font-semibold">Ik heb een code</button>
+        </div>
+      </div>`}
+    </div>
+    <div>
+      ${label('Back-up als bestand')}
       <div class="grid grid-cols-2 gap-2">
-        <button id="exportBtn" class="rounded-xl bg-accent p-3.5 font-bold text-white">Exporteren</button>
+        <button id="exportBtn" class="rounded-xl bg-surface-2 p-3.5 font-bold">Exporteren</button>
         <button id="importBtn" class="rounded-xl bg-surface-2 p-3.5 font-bold">Importeren</button>
       </div>
-      <p class="mt-2 text-center text-[12px] text-muted">Je games staan alleen op dit toestel. Maak af en toe een back-up.</p>
     </div>
     <div class="text-center text-[12px] leading-relaxed text-muted">
       Gegevens: IGDB · omschrijvingen: Wikipedia (CC BY-SA)<br>
@@ -998,11 +1052,109 @@ function renderMore() {
     </div>
   `;
   storageInfoText().then(t => { const el = $('#storageInfo'); if (el) el.textContent = t; });
+  updateSyncStatus();
   $('#exportBtn').onclick = exportBackup;
   $('#refreshBtn').onclick = startRefresh;
   if (refreshing && refreshText) $('#dataStatus').textContent = refreshText;
   $('#importBtn').onclick = () => $('#importInput').click();
 }
+
+// ---------- Sync & herstel ----------
+function updateSyncStatus() {
+  const el = $('#syncStatus');
+  if (!el) return;
+  const { state, error } = syncStatus();
+  const last = lastSync();
+  const when = last ? formatDateTime(new Date(last).toISOString()) : 'nog niet';
+  el.textContent = state === 'syncing' ? 'Bezig met syncen…'
+    : state === 'error' ? `Niet gelukt: ${error}` : !navigator.onLine ? `Offline · laatst ${when}` : `Laatst gesynct ${when}`;
+  $('#syncDot').style.background = state === 'error' ? '#ff5c5c' : state === 'syncing' || !navigator.onLine ? '#f5b942' : '#4fd18b';
+}
+
+// Onderin uitschuivend paneel; geeft het element terug, `close()` sluit het
+function sheet(html) {
+  const el = document.createElement('div');
+  el.className = 'fixed inset-0 z-[55] flex items-end justify-center bg-black/60 opacity-0 transition-opacity duration-200';
+  el.innerHTML = `<div class="pb-safe w-full max-w-[480px] translate-y-full rounded-t-3xl bg-surface px-5 pt-5 transition-transform duration-300">${html}</div>`;
+  const panel = el.firstElementChild;
+  el.close = () => { el.classList.add('opacity-0'); panel.classList.add('translate-y-full'); setTimeout(() => el.remove(), 300); };
+  el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('[data-sheet-close]')) el.close(); });
+  document.body.append(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => { el.classList.remove('opacity-0'); panel.classList.remove('translate-y-full'); }));
+  return el;
+}
+
+function showSyncCode(fresh = false) {
+  const code = syncCode();
+  if (!code) return;
+  const el = sheet(`
+    <b class="block text-[20px]">${fresh ? 'Sync staat aan' : 'Je herstelcode'}</b>
+    <p class="mt-1 text-[13.5px] text-muted">Bewaar deze code goed, bijvoorbeeld in je wachtwoorden-app of notities.
+      Wist Safari je gegevens of pak je een ander toestel, dan zet je hiermee je lijst terug.</p>
+    <div class="my-4 select-all rounded-2xl bg-bg p-4 text-center font-mono text-[24px] font-bold tracking-[.08em] text-ink">${esc(code)}</div>
+    <div class="grid grid-cols-2 gap-2">
+      <button data-code-copy class="rounded-xl bg-surface-2 p-3 font-semibold">Kopiëren</button>
+      <button data-code-share class="rounded-xl bg-surface-2 p-3 font-semibold">Delen / bewaren</button>
+    </div>
+    <button data-sheet-close class="mt-2 w-full rounded-xl bg-accent p-3.5 font-bold text-white">${fresh ? 'Ik heb hem bewaard' : 'Klaar'}</button>`);
+  el.querySelector('[data-code-copy]').onclick = async () => {
+    try { await navigator.clipboard.writeText(code); toast('Herstelcode gekopieerd'); } catch { toast('Kopiëren lukt niet, selecteer de code'); }
+  };
+  el.querySelector('[data-code-share]').onclick = async () => {
+    const text = `Herstelcode Game List: ${code}\n${location.origin}`;
+    try { if (navigator.share) await navigator.share({ title: 'Herstelcode Game List', text }); else { await navigator.clipboard.writeText(text); toast('Herstelcode gekopieerd'); } } catch {}
+  };
+}
+
+function showRestore() {
+  const el = sheet(`
+    <b class="block text-[20px]">Lijst terugzetten</b>
+    <p class="mt-1 text-[13.5px] text-muted">Vul je herstelcode in. Wat er nu op dit toestel staat, wordt samengevoegd met je online lijst.</p>
+    <input id="restoreInput" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" inputmode="text" maxlength="19"
+      placeholder="XXXX-XXXX-XXXX-XXXX" class="mt-4 w-full rounded-2xl bg-bg p-4 text-center font-mono text-[22px] font-bold tracking-[.08em] text-ink outline-none placeholder:text-muted/50">
+    <div id="restoreError" class="mt-2 min-h-[18px] text-center text-[13px] text-[#ff5c5c]"></div>
+    <button id="restoreGo" class="mt-1 w-full rounded-xl bg-accent p-3.5 font-bold text-white disabled:opacity-50">Terugzetten</button>
+    <button data-sheet-close class="mt-2 w-full rounded-xl p-3 font-semibold text-muted">Annuleren</button>`);
+  const input = el.querySelector('#restoreInput');
+  const go = el.querySelector('#restoreGo');
+  const err = el.querySelector('#restoreError');
+  input.addEventListener('input', () => { input.value = formatCode(input.value); err.textContent = ''; });
+  setTimeout(() => input.focus(), 350);
+  const submit = async () => {
+    if (!navigator.onLine) { err.textContent = 'Je bent offline'; return; }
+    go.disabled = true; go.textContent = 'Bezig…';
+    try {
+      const n = await restoreSync(input.value);
+      el.close();
+      toast(`Sync staat aan · ${n} games`);
+      render();
+    } catch (e) {
+      err.textContent = e.message || 'Terugzetten mislukt';
+      go.disabled = false; go.textContent = 'Terugzetten';
+    }
+  };
+  go.onclick = submit;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+}
+
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-sync-restore]')) { showRestore(); return; }
+  if (e.target.closest('[data-sync-code]')) { showSyncCode(); return; }
+  if (e.target.closest('[data-sync-now]')) { await syncNow(); updateSyncStatus(); return; }
+  const on = e.target.closest('[data-sync-on]');
+  if (on) {
+    if (!navigator.onLine) { toast('Je bent offline'); return; }
+    on.disabled = true; on.textContent = 'Bezig…';
+    try { await enableSync(); render(); showSyncCode(true); }
+    catch (err) { toast(err.message || 'Sync aanzetten mislukt'); on.disabled = false; on.textContent = 'Sync aanzetten'; }
+    return;
+  }
+  if (e.target.closest('[data-sync-off]')) {
+    const ok = await pick('Sync uitzetten op dit toestel?', [{ value: 'yes', label: 'Uitzetten (online lijst blijft bestaan)' }]);
+    if (ok !== 'yes') return;
+    disableSync(); render(); toast('Sync staat uit op dit toestel');
+  }
+});
 
 // ---------- Keuze-sheet ----------
 function pick(title, options) {
@@ -1523,7 +1675,7 @@ async function enrichOwned() {
       const urls = await resolveCovers(needCover.map(g => g.coverFile));
       needCover.forEach((g, i) => { if (urls[i]) { g.cover = urls[i]; cacheCover(g.cover); changed = true; } });
     }
-    if (changed) { saveGames(); render(); }
+    if (changed) { saveGames({ silent: true }); render(); }
     // Info (omschrijving, makers, genres): rustig één voor één
     for (const g of games.filter(x => !x.info && (x.igdbId || x.qid || x.wikiTitle))) {
       try {
@@ -1531,7 +1683,7 @@ async function enrichOwned() {
         info.fetchedAt = Date.now();
         g.info = info;
         if (info.youtube && !g.youtube) g.youtube = info.youtube;
-        saveGames();
+        saveGames({ silent: true });
       } catch { break; }
     }
   } finally {
@@ -1648,5 +1800,21 @@ loadExtras().then(() => { if (!$('#detailScreen').hidden) renderDetail(); });
 // Nieuwe gamedatabase binnen (wekelijkse update of de knop in Meer): opnieuw tekenen
 onDatasetUpdate(() => { render(); enrichOwned(); });
 setupUpdates();
+initSync({
+  getLocal: () => ({ games, deleted, swipedNo: [...swipedNo] }),
+  applyMerged(doc) {
+    games = doc.games;
+    deleted = doc.deleted;
+    snapshot = new Map(games.map(g => [g.id, bare(g)]));
+    store.save('gl.games', games);
+    store.save('gl.deleted', deleted);
+    swipedNo.clear(); doc.swipedNo.forEach(k => swipedNo.add(k));
+    store.save('gl.swipedNo', doc.swipedNo);
+    games.forEach(g => cacheCover(g.cover));
+    if ($('#swipeScreen').hidden) render();
+    enrichOwned();
+  },
+  onStatus() { if (prefs.tab === 'more') updateSyncStatus(); },
+});
 requestPersist();
 migrateCoverCache();
