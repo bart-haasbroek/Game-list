@@ -758,8 +758,11 @@ async function loadFranchiseArt(root) {
 }
 
 function discoverHomeHTML() {
-  const up = upcoming(20);
-  const fr = franchiseList();
+  const up = upcoming(300).filter(byPlatform).slice(0, 20);
+  // Met platformfilter: aantallen per franchise opnieuw tellen en lege franchises weglaten
+  const fr = platformFilterOn()
+    ? franchiseList().map(f => ({ ...f, count: franchiseGames(f.name).filter(byPlatform).length })).filter(f => f.count > 0)
+    : franchiseList();
   const tile = (f) => {
     const e = franchiseCover(f.name);
     return `<button data-franchise="${esc(f.name)}" class="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface text-left active:scale-[.97]">
@@ -773,7 +776,7 @@ function discoverHomeHTML() {
   };
   const curated = fr.filter(f => f.curated);
   const others = fr.filter(f => !f.curated);
-  return `
+  return `${filterNoteHTML()}
     ${up.length ? sectionHead('Binnenkort', `<button data-upcoming class="text-[13px] font-semibold text-accent">Alles</button>`).replace('mt-6', 'mt-1')
       + rowScroller(up.map(e => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || '' })).join('')) : ''}
     ${sectionHead('Franchises')}
@@ -799,12 +802,12 @@ function resultRow(g, key) {
 function discoverResultsHTML(q) {
   const nq = normalize(q);
   const folders = franchiseList().filter(f => normalize(f.name).includes(nq) || nq.includes(normalize(f.name))).slice(0, 4);
-  const local = searchDataset(q);
-  let html = folders.map(f => `<button data-franchise="${esc(f.name)}" class="mb-2 flex w-full items-center gap-3 rounded-xl bg-surface p-3 text-left [&_svg]:text-accent">
+  const local = searchDataset(q).filter(byPlatform);
+  let html = filterNoteHTML() + folders.map(f => `<button data-franchise="${esc(f.name)}" class="mb-2 flex w-full items-center gap-3 rounded-xl bg-surface p-3 text-left [&_svg]:text-accent">
       ${ICONS.folder}<div class="flex-1"><div class="font-semibold">${esc(f.name)}</div><div class="text-[12px] text-muted">${f.count} games</div></div>${ICONS.chevron}</button>`).join('');
 
   if (onlineResults && onlineResults.q === q) {
-    const list = onlineResults.items.filter(r => !r.platforms?.length || r.platforms.some(p => NINTENDO_RE.test(p.name || p)));
+    const list = onlineResults.items.filter(r => !r.platforms?.length || r.platforms.some(p => NINTENDO_RE.test(p.name || p))).filter(byPlatform);
     html += `<div class="pb-1 pt-1 text-[11px] text-muted">Online gezocht via ${SOURCE_NAMES[onlineSource]}</div>`;
     html += list.length ? list.map(r => resultRow(r, r.key)).join('') : notice('Ook online niks gevonden.');
   } else {
@@ -849,10 +852,25 @@ async function searchOnline(q) {
 
 // ---------- Franchise-map ----------
 // `split`: aangekondigde games los van de verschenen games tonen (franchise-map)
-function openFolder(title, items, meta, { owned = false, split = false } = {}) {
+let folderState = null; // laatst geopende map, om opnieuw te tekenen als het platformfilter verandert
+function openFolder(title, allItems, meta, opts = {}) {
+  folderState = { title, allItems, meta, opts };
+  drawFolder();
+  $('#folderBody').scrollTop = 0;
+  $('#folderSwipe').hidden = true;
+  hideScreen($('#detailScreen'), { animate: false }); // anders ligt de map achter de info-pagina
+  showScreen($('#folderScreen'));
+}
+
+function drawFolder() {
+  const { title, allItems, meta: givenMeta, opts: { owned = false, split = false, sub = null } } = folderState;
+  const items = allItems.filter(byPlatform);
+  const meta = givenMeta && platformFilterOn() ? `${items.length} van ${allItems.length} · ${prefs.platforms.join(', ')}` : givenMeta;
   $('#folderTitle').textContent = title;
-  const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}`;
-  const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: [e.platforms?.[0], e.year].filter(Boolean).join(' · ') });
+  const count = `${items.length} ${items.length === 1 ? 'game' : 'games'}${platformFilterOn() ? ` · ${prefs.platforms.join(', ')}` : ''}`;
+  // Onder de titel het platform waarop je filtert (anders het eerste platform van de game)
+  const plat = (e) => (platformFilterOn() && platformsOf(e).find(p => prefs.platforms.includes(p))) || e.platforms?.[0];
+  const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: sub?.(e) ?? [plat(e), e.year].filter(Boolean).join(' · ') });
   const body = $('#folderBody');
   const soon = split ? items.filter(e => isFuture(e.release)) : [];
   if (soon.length) {
@@ -865,13 +883,10 @@ function openFolder(title, items, meta, { owned = false, split = false } = {}) {
       + (out.length ? head('Verschenen', out.length, 'mt-3') + out.map(card).join('') : '');
     $('#folderMeta').textContent = meta ?? `${count} · ${soon.length} binnenkort`;
   } else {
-    body.innerHTML = items.map(card).join('');
+    body.innerHTML = items.length ? items.map(card).join('')
+      : `<div class="col-span-full">${notice(`Geen games op ${esc(prefs.platforms.join(', '))}.<small><button data-filter-clear class="font-semibold text-accent">Filter wissen</button></small>`)}</div>`;
     $('#folderMeta').textContent = meta ?? count;
   }
-  body.scrollTop = 0;
-  $('#folderSwipe').hidden = true;
-  hideScreen($('#detailScreen'), { animate: false }); // anders ligt de map achter de info-pagina
-  showScreen($('#folderScreen'));
   hydrate(body);
 }
 const openFranchise = (name) => loadDataset().then(() => {
@@ -883,12 +898,87 @@ const openFranchise = (name) => loadDataset().then(() => {
 const openUpcoming = () => loadDataset().then(() => {
   const known = upcoming(1000);
   const list = [...known, ...upcoming(1000, { notable: false }).filter(e => !known.includes(e))];
-  openFolder('Binnenkort', list, `${list.length} aangekondigde Nintendo-games`);
-  $('#folderBody').querySelectorAll('[data-open]').forEach((b, i) => {
-    const cd = countdown(list[i].release);
-    if (cd) b.lastElementChild.textContent = cd.small;
-  });
+  openFolder('Binnenkort', list, `${list.length} aangekondigde Nintendo-games`, { sub: (e) => countdown(e.release)?.small || '' });
 });
+
+// ---------- Platformfilter (Ontdek en mappen) ----------
+// Rond knopje met een popover; meerdere platforms tegelijk. Bewaard in prefs.platforms.
+const FILTER_PLATFORMS = ['Switch 2', 'Switch', 'Wii U', 'Wii', '3DS', 'DS', 'GameCube', 'N64', 'SNES', 'NES', 'GBA', 'GBC', 'Game Boy', 'Virtual Boy'];
+const PLATFORM_GROUP = { 'New 3DS': '3DS', DSi: 'DS', FDS: 'NES' }; // varianten tellen mee bij het hoofdplatform
+if (!Array.isArray(prefs.platforms)) prefs.platforms = [];
+const platformFilterOn = () => prefs.platforms.length > 0;
+const platformsOf = (e) => (e.myPlatforms?.length ? e.myPlatforms : e.platforms || [])
+  .map(p => { const s = shortPlatform(p); return PLATFORM_GROUP[s] || s; });
+const byPlatform = (e) => !platformFilterOn() || platformsOf(e).some(p => prefs.platforms.includes(p));
+const filterNoteHTML = () => platformFilterOn()
+  ? `<div class="mb-3 flex items-center gap-2 text-[13px] text-muted">Alleen <b class="truncate text-ink">${esc(prefs.platforms.join(', '))}</b>
+      <button data-filter-clear class="ml-auto flex-none font-semibold text-accent">Wissen</button></div>` : '';
+
+function updateFilterButtons() {
+  for (const b of document.querySelectorAll('[data-platform-filter]')) {
+    b.setAttribute('aria-pressed', platformFilterOn());
+    const c = b.querySelector('[data-filter-count]');
+    c.hidden = !platformFilterOn();
+    c.textContent = prefs.platforms.length;
+  }
+}
+
+function setPlatforms(list) {
+  prefs.platforms = FILTER_PLATFORMS.filter(p => list.includes(p)); // vaste volgorde
+  savePrefs();
+  updateFilterButtons();
+  if (!$('#folderScreen').hidden && folderState) drawFolder();
+  if (prefs.tab === 'discover') renderDiscover();
+  if ($('#popover')) renderPopover();
+}
+
+function renderPopover() {
+  const pop = $('#popover');
+  const row = (p) => {
+    const on = prefs.platforms.includes(p);
+    return `<button data-pf="${esc(p)}" role="menuitemcheckbox" aria-checked="${on}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] font-semibold active:bg-surface ${on ? 'text-ink' : 'text-muted'}">
+      <span class="grid size-5 flex-none place-items-center rounded-md ${on ? 'bg-accent text-white' : 'ring-2 ring-line ring-inset'} [&_svg]:size-3.5 [&_svg]:stroke-[3.5]">${on ? svg('<path d="M20 6 9 17l-5-5"/>') : ''}</span>${esc(p)}</button>`;
+  };
+  pop.innerHTML = `<div class="flex items-center justify-between px-3 pb-1 pt-1.5">
+      <b class="text-[13px] uppercase tracking-wider text-muted">Platform</b>
+      ${platformFilterOn() ? '<button data-filter-clear class="text-[13px] font-semibold text-accent">Alles tonen</button>' : ''}
+    </div>${FILTER_PLATFORMS.map(row).join('')}`;
+}
+
+function openPopover(btn) {
+  closePopover();
+  const pop = document.createElement('div');
+  pop.id = 'popover';
+  pop.setAttribute('role', 'menu');
+  pop.className = 'no-scrollbar fixed z-30 w-60 animate-fade overflow-y-auto rounded-2xl bg-surface-2 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-line';
+  document.body.append(pop);
+  renderPopover();
+  // Onder het knopje, rechts uitgelijnd; past het er niet onder, dan zo hoog als er ruimte is
+  const r = btn.getBoundingClientRect();
+  pop.style.top = `${r.bottom + 8}px`;
+  pop.style.right = `${Math.max(12, innerWidth - r.right)}px`;
+  pop.style.maxHeight = `${innerHeight - r.bottom - 90}px`;
+  btn.setAttribute('aria-expanded', 'true');
+}
+function closePopover() {
+  $('#popover')?.remove();
+  document.querySelectorAll('[data-platform-filter]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
+document.addEventListener('click', (e) => {
+  const fb = e.target.closest('[data-platform-filter]');
+  if (fb) { e.stopPropagation(); $('#popover') ? closePopover() : openPopover(fb); return; }
+  const pf = e.target.closest('[data-pf]');
+  if (pf) {
+    const p = pf.dataset.pf;
+    setPlatforms(prefs.platforms.includes(p) ? prefs.platforms.filter(x => x !== p) : [...prefs.platforms, p]);
+    return;
+  }
+  if (e.target.closest('[data-filter-clear]')) { setPlatforms([]); return; }
+  if ($('#popover') && !e.target.closest('#popover')) closePopover();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePopover(); });
+updateFilterButtons();
 
 // ---------- Swipen: wat heb ik gespeeld? ----------
 // Per franchise een stapel kaarten: naar rechts = uitgespeeld (komt in Uitgespeeld, zonder datum),
@@ -2008,26 +2098,8 @@ const detailOpen = () => !$('#detailScreen').hidden;
 window.addEventListener('online', () => { enrichOwned(); render(); if (detailOpen()) { renderDetail(); loadDetails(); } });
 window.addEventListener('offline', () => { render(); if (detailOpen()) renderDetail(); });
 
-// iOS-bug in web-apps op het beginscherm: het scherm van de app is soms (bv. na het toetsenbord)
-// een stuk korter dan het echte scherm, waardoor de tabbalk boven een lege strook zweeft.
-// Meten en het verschil (--vgap) gebruiken om alles wat onderaan vastzit door te trekken.
-const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-function fixViewportGap() {
-  if (!standalone) return;
-  const editing = document.activeElement?.matches?.('input, textarea, [contenteditable="true"]');
-  if (editing) return; // toetsenbord open: dan hoort het scherm korter te zijn
-  window.scrollTo(0, 0); // iOS laat de pagina soms verschoven staan na het toetsenbord
-  const portrait = innerHeight > innerWidth;
-  const full = portrait ? Math.max(screen.height, screen.width) : Math.min(screen.height, screen.width);
-  const gap = full - innerHeight;
-  document.documentElement.style.setProperty('--vgap', gap > 0 && gap < 120 ? gap + 'px' : '0px');
-}
-fixViewportGap();
-addEventListener('resize', fixViewportGap);
-addEventListener('orientationchange', () => setTimeout(fixViewportGap, 300));
-visualViewport?.addEventListener('resize', fixViewportGap);
-document.addEventListener('focusout', () => setTimeout(fixViewportGap, 150));
-document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(fixViewportGap, 100); });
+// Na het toetsenbord laat iOS de pagina soms een stukje verschoven staan: terugzetten
+document.addEventListener('focusout', () => setTimeout(() => { if (!document.activeElement?.matches?.('input, textarea, [contenteditable="true"]')) window.scrollTo(0, 0); }, 100));
 
 // Pinch-zoom blokkeren (iOS negeert user-scalable=no soms).
 // Dubbeltik-zoom staat uit via `touch-action: manipulation` in de CSS.

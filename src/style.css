@@ -80,9 +80,12 @@
 
 @layer base {
   /* App-gevoel: pagina scrollt, stuitert en zoomt niet */
+  /* Geen position: fixed op html/body: daarmee maakt iOS het scherm van een web-app op het beginscherm
+     te kort (strook onder de tabbalk). Zoals in bird-list: gewoon de hoogte van het scherm (dvh). */
   html, body {
-    position: fixed;
-    inset: 0;
+    height: 100%;
+    height: 100dvh;
+    margin: 0;
     overflow: hidden;
     overscroll-behavior: none;
     touch-action: manipulation;
@@ -175,9 +178,3 @@
 /* Franchise-map: nog niet verschenen games herken je aan een accentrand en gedimde cover */
 [data-soon] > div:first-child { outline: 2px dashed color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: 2px; }
 [data-soon] > div:first-child img { filter: saturate(.55) brightness(.85); }
-
-/* iOS-correctie (zie fixViewportGap in main.js): onderkant doortrekken als het app-scherm te kort is */
-html, body { bottom: calc(-1 * var(--vgap, 0px)); }
-#tabs, #detailScreen, #folderScreen, #swipeScreen, #notesScreen, #manualScreen, #trailer, #picker { bottom: calc(-1 * var(--vgap, 0px)); }
-#addBtn { translate: 0 var(--vgap, 0px); }
-#toast { translate: -50% var(--vgap, 0px); }

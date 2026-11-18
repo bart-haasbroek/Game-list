@@ -2,7 +2,7 @@
 <html lang="nl">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Game List</title>
   <meta name="theme-color" content="#0f1115">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -48,12 +48,16 @@
 
     <!-- Ontdek -->
     <section id="discoverView" class="view flex min-h-0 flex-1 flex-col" hidden>
-      <div class="flex-none px-4 pb-2">
-        <div class="flex h-[42px] items-center gap-2 rounded-xl bg-surface px-3">
+      <div class="flex flex-none items-center gap-2 px-4 pb-2">
+        <div class="flex h-[42px] min-w-0 flex-1 items-center gap-2 rounded-xl bg-surface px-3">
           <svg viewBox="0 0 24 24" class="size-[18px]! flex-none text-muted"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
           <input id="searchInput" type="search" placeholder="Zoeken in games…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" class="min-w-0 flex-1 bg-transparent outline-none">
           <button id="clearSearch" class="text-muted" aria-label="Wissen" hidden><svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
+        <button id="discoverFilter" data-platform-filter aria-label="Filter op platform" aria-haspopup="dialog" class="relative grid size-[42px] flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
+          <svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          <span data-filter-count class="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white" hidden></span>
+        </button>
       </div>
       <div id="discoverBody" class="pb-grid no-scrollbar flex-1 overflow-y-auto overscroll-contain px-4"></div>
     </section>
@@ -92,7 +96,12 @@
         <h2 id="folderTitle" class="truncate text-[22px] font-bold tracking-tight"></h2>
         <div id="folderMeta" class="text-[13px] text-muted"></div>
       </div>
-      <button id="folderSwipe" class="ml-auto flex-none rounded-full bg-accent/15 px-3 py-1.5 text-[13px] font-semibold text-accent" hidden>Wat heb ik gespeeld?</button>
+      <span class="flex-1"></span>
+      <button id="folderSwipe" class="flex-none rounded-full bg-accent/15 px-3 py-1.5 text-[13px] font-semibold text-accent" hidden>Wat heb ik gespeeld?</button>
+      <button id="folderFilter" data-platform-filter aria-label="Filter op platform" aria-haspopup="dialog" class="relative grid ml-2 size-9 flex-none place-items-center rounded-full bg-surface text-muted active:scale-95 aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60">
+          <svg viewBox="0 0 24 24" class="size-[18px]!"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          <span data-filter-count class="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white" hidden></span>
+        </button>
     </header>
     <div id="folderBody" class="pb-under-tabs no-scrollbar grid flex-1 grid-cols-3 content-start gap-x-2.5 gap-y-3.5 overflow-y-auto overscroll-contain px-4 pt-1 sm:grid-cols-5"></div>
   </section>
