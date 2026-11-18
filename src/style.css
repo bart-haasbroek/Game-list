@@ -133,8 +133,7 @@ section.settled { animation: none; box-shadow: none; }
 
 /* ---------- Desktop: menu links in een zijbalk ----------
    Gewone (niet-gelaagde) CSS wint van de Tailwind-utilities, dus hier kan de mobiele opmaak overschreven worden. */
-/* Bibliotheek: 7 lijsten in 3 kolommen, de laatste (Gestopt) als brede rij */
-.lib-tiles > :last-child { grid-column: 1 / -1; aspect-ratio: auto; flex-direction: row; align-items: center; gap: 12px; }
+/* Bibliotheek: zes lijsten in twee volle rijen van drie */
 
 @media (min-width: 1024px) {
   :root { --side: 240px; --gutter: 32px; }
@@ -173,8 +172,7 @@ section.settled { animation: none; box-shadow: none; }
   .row-scroller::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
 
   #listView, #folderBody { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); column-gap: 16px; row-gap: 20px; }
-  .lib-tiles { grid-template-columns: repeat(7, minmax(0, 1fr)); max-width: 1200px; }
-  .lib-tiles > :last-child { grid-column: auto; aspect-ratio: 1 / .85; flex-direction: column; align-items: stretch; }
+  .lib-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); max-width: 1200px; }
   .home-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   #libraryView > :not(.lib-tiles), #moreView > * { max-width: 720px; }
 
@@ -210,3 +208,10 @@ section.settled { animation: none; box-shadow: none; }
 /* Franchise-map: nog niet verschenen games herken je aan een accentrand en gedimde cover */
 [data-soon] > div:first-child { outline: 2px dashed color-mix(in srgb, var(--color-accent) 70%, transparent); outline-offset: 2px; }
 [data-soon] > div:first-child img { filter: saturate(.55) brightness(.85); }
+
+/* Lijstknoppen op de info-pagina: vaste plek, de huidige lijst licht op in zijn eigen kleur */
+.status-btn { background: var(--color-surface); color: var(--color-muted); transition: background-color .15s, color .15s, box-shadow .15s, transform .1s; }
+.status-btn svg { color: var(--c); }
+.status-btn:active:not(:disabled) { transform: scale(.96); }
+.status-btn.is-on { background: color-mix(in srgb, var(--c) 18%, var(--color-surface)); color: var(--color-ink); box-shadow: inset 0 0 0 2px var(--c); }
+.status-btn:disabled { opacity: .3; }

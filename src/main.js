@@ -23,7 +23,6 @@ const ICONS = {
   completed: svg('<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.6 3.9M17 6h2.5a2.5 2.5 0 0 1-2.6 3.9"/>'),
   backlog: svg('<path d="M21 8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>'),
   wishlist: svg('<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/>'),
-  interested: svg('<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>'),
   library: svg('<rect x="4" y="8" width="16" height="13" rx="2.5"/><path d="M6.5 5h11M9 2h6"/>'),
   discover: svg('<circle cx="6" cy="16" r="4"/><circle cx="18" cy="16" r="4"/><path d="M10 16a2 2 0 0 1 4 0"/><path d="M2.3 14.5 5 6a2 2 0 0 1 3.8.4L10 13M21.7 14.5 19 6a2 2 0 0 0-3.8.4L14 13"/>'),
   stopped: svg('<circle cx="12" cy="12" r="10"/><path d="M9 9h6v6H9z"/>'),
@@ -46,31 +45,21 @@ const LISTS = [
   { id: 'wishlist',   label: 'Wishlist',    short: 'Wishlist',   empty: 'Je wishlist is leeg. Aangekondigde games krijgen hier een afteller.' },
   { id: 'finished',   label: 'Uitgespeeld', short: 'Klaar',      empty: 'Nog niks uitgespeeld.' },
   { id: 'completed',  label: 'Compleet',    short: '100%',       empty: 'Games die je helemaal (100%) hebt uitgespeeld komen hier.' },
-  { id: 'interested', label: 'Interessant', short: 'Interesse',  empty: 'Games die je leuk lijken komen hier.' },
   { id: 'stopped',    label: 'Gestopt',     short: 'Gestopt',    empty: 'Games waar je mee gestopt bent komen hier.' },
 ];
 // Kleur per lijst (tegels in de Bibliotheek)
-const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', interested: '#f5b84a', stopped: '#b5776b' };
-const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'completed', 'interested', 'stopped'];
+const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', stopped: '#b5776b' };
+const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'completed', 'stopped'];
 const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
 // Lijsten die alleen kunnen als de game al uit is
 const NEEDS_RELEASE = ['playing', 'finished', 'completed', 'stopped'];
 // Uitgespeeld of compleet: allebei 'klaar' (uitspeeldatum, 'uitgespeeld in <jaar>', Laatst uitgespeeld)
 const DONE = ['finished', 'completed'];
-// Slimme lijstkeuze op de info-pagina: alleen de stappen die logisch volgen op waar de game nu staat,
-// met een passende tekst. De rest zit achter "Andere lijst".
-// [lijst, tekst] — de tekst valt terug op de korte lijstnaam
-const WANT = ['wishlist', 'interested']; // lijsten voor games die je (nog) niet hebt
-const NEXT_STEPS = {
-  none:       [['wishlist'], ['interested'], ['backlog', 'Heb ik'], ['playing'], ['finished']],
-  wishlist:   [['backlog', 'Gekocht'], ['playing'], ['finished', 'Al gespeeld'], ['interested', 'Toch niet']],
-  interested: [['wishlist'], ['backlog', 'Heb ik'], ['playing'], ['finished', 'Al gespeeld']],
-  backlog:    [['playing', 'Begonnen'], ['finished', 'Al gespeeld'], ['completed']],
-  playing:    [['finished', 'Uitgespeeld!'], ['completed'], ['stopped', 'Gestopt'], ['backlog', 'Pauze']],
-  finished:   [['completed', '100% gehaald'], ['playing', 'Opnieuw spelen']],
-  completed:  [['playing', 'Opnieuw spelen'], ['finished', 'Toch niet 100%']],
-  stopped:    [['playing', 'Weer oppakken'], ['finished', 'Toch uitgespeeld'], ['backlog', 'Later verder']],
-};
+// Lijstknoppen op de info-pagina: altijd dezelfde zes op dezelfde plek (niets verspringt), in de volgorde
+// van wensen tot klaar. Wat niet kan blijft staan maar gedimd.
+const STATUS_ORDER = ['wishlist', 'backlog', 'playing', 'finished', 'completed', 'stopped'];
+// 'Interessant' bestaat niet meer: zulke games horen op de wishlist
+const fixStatus = (g) => { if (g?.status === 'interested') g.status = 'wishlist'; return g; };
 const TABS = [
   { id: 'home', label: 'Home' },
   { id: 'library', label: 'Bibliotheek' },
@@ -107,6 +96,7 @@ const store = {
 };
 let games = store.load('gl.games', []);
 // Van één platform (myPlatform) naar een lijst (myPlatforms); geen echte wijziging, dus vóór de sync-snapshot
+if (games.some(g => g.status === 'interested')) { games.forEach(fixStatus); store.save('gl.games', games); }
 for (const g of games) if (!Array.isArray(g.myPlatforms)) g.myPlatforms = g.myPlatform ? [g.myPlatform] : [];
 const prefs = Object.assign({ tab: 'home', sort: 'added' }, store.load('gl.prefs', {}));
 if (!TABS.some(t => t.id === prefs.tab)) prefs.tab = ['playing', 'backlog', 'wishlist'].includes(prefs.tab) ? 'library' : 'home';
@@ -1601,24 +1591,16 @@ function renderDetail() {
   // Nog niet uit: spelen, uitspelen of ermee stoppen kan nog niet
   const notOut = isFuture(g.release);
   const cur = owned ? g.status : null;
-  const steps = (NEXT_STEPS[cur || 'none']).filter(([id]) => !(notOut && NEEDS_RELEASE.includes(id)))
-    .map(([id, text]) => (notOut && id === 'backlog' ? [id, 'Besteld'] : [id, text])); // nog niet uit: "op de plank" = besteld
-  const shown = new Set([cur, ...steps.map(([id]) => id)]);
-  // Heb je de game al (op de plank, gespeeld…), dan zijn Wishlist en Interessant geen optie meer
-  const have = cur && !WANT.includes(cur);
-  const others = LISTS.filter(l => !shown.has(l.id) && !(notOut && NEEDS_RELEASE.includes(l.id)) && !(have && WANT.includes(l.id)));
-  const stepBtn = (id, text, extra = '') => `<button data-status="${id}" class="flex min-w-0 flex-col items-center gap-1 rounded-xl bg-surface px-0.5 py-2.5 text-[10.5px] font-semibold text-ink active:scale-95 [&_svg]:size-5 ${extra}" ><span style="color:${LIST_COLORS[id]}">${ICONS[id]}</span><span class="max-w-full truncate">${esc(text || listById[id].short)}</span></button>`;
-  const statusBtns = `
-    ${cur ? `<div class="mb-2 flex items-center gap-2.5 rounded-xl px-3 py-2.5" style="background:${LIST_COLORS[cur]}1f">
-      <span class="grid size-8 flex-none place-items-center rounded-full [&_svg]:size-[18px]" style="background:${LIST_COLORS[cur]}33;color:${LIST_COLORS[cur]}">${ICONS[cur]}</span>
-      <div class="min-w-0 flex-1 leading-tight"><div class="text-[11px] text-muted">Staat op</div><b class="text-[15px]">${listById[cur].label}</b></div>
-      ${steps.length ? '<span class="text-[11px] text-muted">Volgende stap ↓</span>' : ''}
-    </div>` : ''}
-    <div class="grid grid-cols-4 gap-1.5">${steps.map(([id, text]) => stepBtn(id, text)).join('')}</div>
-    ${others.length ? `<details class="group mt-1.5">
-      <summary class="flex cursor-pointer list-none items-center gap-1 py-1.5 text-[12px] font-semibold text-muted [&::-webkit-details-marker]:hidden">Andere lijst<span class="transition-transform group-open:rotate-90">›</span></summary>
-      <div class="grid grid-cols-4 gap-1.5 pt-1">${others.map(l => stepBtn(l.id, l.short, 'opacity-80')).join('')}</div>
-    </details>` : ''}`;
+  const statusBtns = `<div class="grid grid-cols-3 gap-1.5">${STATUS_ORDER.map(id => {
+    const on = cur === id;
+    // Gedimd: spelen/uitspelen/stoppen vóór de release, of de wishlist als je de game al hebt
+    const off = !on && ((notOut && NEEDS_RELEASE.includes(id)) || (id === 'wishlist' && cur && cur !== 'wishlist'));
+    const c = LIST_COLORS[id];
+    const text = notOut && id === 'backlog' ? 'Besteld' : listById[id].label;
+    return `<button data-status="${id}" aria-pressed="${on}" ${off ? 'disabled' : ''} style="--c:${c}"
+      class="status-btn flex h-[62px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[12px] font-semibold [&_svg]:size-5 ${on ? 'is-on' : ''}">
+      ${ICONS[id]}<span class="max-w-full truncate">${esc(text)}</span></button>`;
+  }).join('')}</div>`;
 
   const ratingBtns = Array.from({ length: 11 }, (_, i) => {
     const on = g.rating != null && i <= g.rating;
@@ -1684,7 +1666,7 @@ function renderDetail() {
 
     ${owned ? `
     <div class="mt-6">
-      ${label(['backlog', 'wishlist', 'interested'].includes(g.status) ? 'Mijn platform' : 'Gespeeld op')}
+      ${label(['backlog', 'wishlist'].includes(g.status) ? 'Mijn platform' : 'Gespeeld op')}
       <div class="flex flex-wrap gap-1.5">
         ${platformChoices(g, platforms).map(p => `<button data-platform="${esc(p)}" aria-pressed="${mine_.includes(p)}" class="rounded-full px-3 py-1.5 text-[13px] font-semibold ${mine_.includes(p) ? 'bg-ink text-bg' : 'bg-surface text-muted'}">${mine_.includes(p) ? '✓ ' : ''}${esc(p)}</button>`).join('')}
         <button data-add-platform class="rounded-full border border-dashed border-line px-3 py-1.5 text-[13px] font-semibold text-muted">+ Platform</button>
@@ -1829,6 +1811,7 @@ $('#detailBody').addEventListener('click', async (e) => {
   const s = e.target.closest('[data-status]');
   if (s) {
     const status = s.dataset.status;
+    if (owned && g.status === status) return; // staat er al op
     if (isFuture(g.release) && NEEDS_RELEASE.includes(status)) { toast('Deze game is nog niet uit'); return; }
     if (!owned) {
       const rec = addFromView(g, status);
@@ -2044,6 +2027,7 @@ $('#importInput').addEventListener('change', async (e) => {
     const data = JSON.parse(await file.text());
     const incoming = Array.isArray(data) ? data : data.games;
     if (!Array.isArray(incoming)) throw new Error();
+    incoming.forEach(fixStatus);
     const mode = await pick(`${incoming.length} games gevonden`, [
       { value: 'merge', label: 'Samenvoegen met huidige lijst' },
       { value: 'replace', label: 'Huidige lijst vervangen' },
@@ -2233,7 +2217,7 @@ initSync({
   getLocal: () => ({ games: games.map(slimGame), deleted, swipedNo: [...swipedNo] }),
   applyMerged(doc) {
     const local = new Map(games.map(g => [g.id, g]));
-    games = doc.games.map(g => hydrateGame(g, local.get(g.id)));
+    games = doc.games.map(g => fixStatus(hydrateGame(g, local.get(g.id))));
     deleted = doc.deleted;
     snapshot = new Map(games.map(g => [g.id, bare(g)]));
     store.save('gl.games', games);
