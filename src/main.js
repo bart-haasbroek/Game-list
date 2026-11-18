@@ -397,6 +397,7 @@ function showScreen(el) {
 
 function hideScreen(el, { animate = true, after } = {}) {
   if (el.hidden) return;
+  if (el.id === 'swipeScreen') flushSwipe(); // veeg die nog bezig was niet kwijtraken
   const modal = el.classList.contains('modal');
   if (modal) { openModals.delete(el); syncBackdrop(); }
   el.classList.remove('settled'); // anders blokkeert 'animation: none' de uitschuif-animatie
@@ -1029,8 +1030,12 @@ function drawFolder() {
   const card = (e) => owned ? cardHTML(e) : cardHTML(e, { ref: e.key, sub: sub?.(e) ?? [plat(e), e.year].filter(Boolean).join(' · ') });
   const body = $('#folderBody');
   const soon = split ? items.filter(e => isFuture(e.release)) : [];
+  // Franchise: nieuwste eerst, maar games waar (bijna) niemand van weet achteraan (bv. de peuter-apps "Hello, Luigi!")
+  const known = (e) => (e.pop > 0 ? 0 : 1);
+  const byNewest = (list) => list.sort((a, b) => known(a) - known(b) || String(b.release || '').localeCompare(String(a.release || '')));
+  if (split && !soon.length) byNewest(items);
   if (soon.length) {
-    const out = items.filter(e => !isFuture(e.release)).sort((a, b) => String(b.release || '').localeCompare(String(a.release || '')));
+    const out = byNewest(items.filter(e => !isFuture(e.release)));
     soon.sort((a, b) => String(a.release || '9999').localeCompare(String(b.release || '9999')));
     const head = (text, n, cls = '') => `<div class="col-span-full flex items-baseline gap-2 ${cls}"><h3 class="text-[17px] font-bold">${text}</h3><span class="text-[13px] text-muted">${n}</span></div>`;
     // Nog niet verschenen: release-datum in plaats van platform/jaar, en een stippelrand
@@ -1195,12 +1200,14 @@ function openSwipe(set = null) {
 }
 
 function startSwipe(set) {
+  flushSwipe();
   // gen: elke nieuwe stapel krijgt een nieuw nummer, zodat een timer van de vorige stapel niks meer doet
   Object.assign(swipe, { set, queue: swipeCandidates(set), history: [], yes: 0, part: 0, no: 0, busy: false, gen: (swipe.gen || 0) + 1 });
   renderSwipe();
 }
 
 function renderSwipePicker() {
+  flushSwipe();
   swipe.set = null;
   swipe.gen = (swipe.gen || 0) + 1; // lopende veeg-animatie van de vorige stapel negeren
   swipe.busy = false;
@@ -1378,6 +1385,9 @@ function bindSwipeCard(card) {
 }
 
 // choice: 'yes' (uitgespeeld), 'up' (gespeeld, niet uitgespeeld) of 'no' (niet gespeeld)
+// Ga je weg terwijl een kaartje nog wegvliegt (terug, andere franchise, sluiten), dan telt die veeg gewoon mee
+const flushSwipe = () => swipe.pending?.();
+
 function swipeDecide(choice) {
   const card = $('#swipeCard');
   if (!card || swipe.busy) return;
@@ -1393,9 +1403,11 @@ function swipeDecide(choice) {
   }
   navigator.vibrate?.(10);
   const gen = swipe.gen, e = swipe.queue[0];
-  setTimeout(() => {
-    // Intussen een andere stapel gestart of het scherm gesloten en opnieuw begonnen: niks doen
-    if (swipe.gen !== gen || swipe.queue[0] !== e) return;
+  // De keuze zelf; draait na de animatie, of meteen als je intussen weggaat (flushSwipe)
+  const commit = () => {
+    if (swipe.pending !== commit) return; // al verwerkt
+    swipe.pending = null;
+    if (swipe.gen !== gen || swipe.queue[0] !== e) return; // hoort niet (meer) bij deze stapel
     try {
       lightButton(choice, 0);
       swipe.queue.shift();
@@ -1415,7 +1427,9 @@ function swipeDecide(choice) {
       swipe.busy = false; // ook bij een fout: anders reageert geen kaartje meer
       renderSwipe();
     }
-  }, 320);
+  };
+  swipe.pending = commit;
+  setTimeout(commit, 320);
 }
 
 // Na het swipen: precies de games die je net als uitgespeeld ('yes') of gespeeld ('up') hebt gemarkeerd
@@ -1874,13 +1888,14 @@ function renderDetail() {
         : `<a href="${ytSearch}" target="_blank" rel="noopener" class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-surface-2 p-3 font-semibold [&_svg]:size-4">${ICONS.play}Zoek trailer op YouTube</a>`}
     </div>
 
-    ${cd ? '' : scoresHTML(critic, playtime, g.title)}
-
+    <!-- Lijst eerst: dat is de belangrijkste actie (zeker bij een game die je nog niet hebt) -->
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
       ${statusBtns}
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
+
+    ${cd ? '' : scoresHTML(critic, playtime, g.title)}
 
     ${owned ? `
     <div class="mt-6">
