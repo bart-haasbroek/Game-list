@@ -88,6 +88,24 @@ if (!TABS.some(t => t.id === prefs.tab)) prefs.tab = ['playing', 'backlog', 'wis
 let deleted = store.load('gl.deleted', {});
 const bare = (g) => JSON.stringify({ ...g, updatedAt: undefined });
 let snapshot = new Map(games.map(g => [g.id, bare(g)]));
+// Voor de sync alleen wat van jou is (status, cijfer, notities, datums, platform, eigen cover/trailer)
+// plus waarmee de game te herkennen is. Gegevens uit IGDB/Wikipedia haalt elk toestel zelf op.
+const FETCHED = ['info', 'artwork'];
+const FETCHED_IGDB = ['summary', 'genres', 'franchise', 'wikiTitle', 'nlTitle', 'youtube', 'qid', 'coverFile'];
+function slimGame(g) {
+  const out = { ...g };
+  for (const k of FETCHED) delete out[k];
+  if (g.igdbId) for (const k of FETCHED_IGDB) delete out[k];
+  return out;
+}
+// Binnengekomen (slanke) versie aanvullen met wat dit toestel al had opgehaald
+function hydrateGame(remote, local) {
+  if (!local) return remote;
+  const keep = {};
+  for (const k of [...FETCHED, ...(remote.igdbId ? FETCHED_IGDB : [])]) if (!(k in remote) && local[k] !== undefined) keep[k] = local[k];
+  return { ...keep, ...remote };
+}
+
 function saveGames({ silent = false } = {}) {
   const now = Date.now();
   const next = new Map();
@@ -467,7 +485,7 @@ async function ensureArtwork(g) {
     const d = await res.json();
     const patch = { artwork: d.artwork || null };
     if (g.info && !g.info.playtime && d.playtime) patch.info = { ...g.info, playtime: d.playtime, critic: d.critic || g.info.critic };
-    updateGame(g.id, patch);
+    updateGame(g.id, patch, { silent: true });
     if (prefs.tab === 'home' && $('#detailScreen').hidden) renderHome();
   } catch {}
 }
@@ -1208,7 +1226,7 @@ async function loadDetails() {
     if (owned) {
       const patch = { info };
       if (info.youtube && !g.youtube) patch.youtube = info.youtube;
-      updateGame(g.id, patch);
+      updateGame(g.id, patch, { silent: true });
     } else detailsCache.set(g.key, info);
   } catch {
     if (!owned) detailsCache.set(g.key, { failed: true });
@@ -1414,11 +1432,12 @@ function addFromView(g, status) {
   return rec;
 }
 
-function updateGame(id, patch) {
+// `silent`: automatisch opgehaalde gegevens (artwork, info), geen wijziging van jou
+function updateGame(id, patch, { silent = false } = {}) {
   const g = games.find(x => x.id === id);
   if (!g) return;
-  Object.assign(g, patch, { updatedAt: Date.now() });
-  saveGames();
+  Object.assign(g, patch, silent ? {} : { updatedAt: Date.now() });
+  saveGames({ silent });
   render();
 }
 
@@ -1801,9 +1820,10 @@ loadExtras().then(() => { if (!$('#detailScreen').hidden) renderDetail(); });
 onDatasetUpdate(() => { render(); enrichOwned(); });
 setupUpdates();
 initSync({
-  getLocal: () => ({ games, deleted, swipedNo: [...swipedNo] }),
+  getLocal: () => ({ games: games.map(slimGame), deleted, swipedNo: [...swipedNo] }),
   applyMerged(doc) {
-    games = doc.games;
+    const local = new Map(games.map(g => [g.id, g]));
+    games = doc.games.map(g => hydrateGame(g, local.get(g.id)));
     deleted = doc.deleted;
     snapshot = new Map(games.map(g => [g.id, bare(g)]));
     store.save('gl.games', games);
