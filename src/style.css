@@ -139,7 +139,8 @@ section.settled { animation: none; box-shadow: none; }
 
 @media (min-width: 1024px) {
   :root { --side: 240px; --gutter: 32px; }
-  body > .flex { padding-left: var(--side); }
+  /* Alleen het hoofdscherm naast de zijbalk (eerst "body > .flex": dat raakte ook de melding, die ook flex is) */
+  #app { padding-left: var(--side); }
   /* Melding midden in het inhoudsdeel, onderaan (tabs staan dan links) */
   .toast { left: calc(50% + var(--side) / 2); bottom: 28px; }
   /* Detail- en mappagina's naast de zijbalk, zodat de tabs zichtbaar blijven */
@@ -157,10 +158,10 @@ section.settled { animation: none; box-shadow: none; }
   }
   #tabs > button:hover:not(.bg-accent\/15) { background: var(--color-surface); color: var(--color-ink); }
 
-  body > .flex > header, .view:not(#discoverView), #discoverView > div:first-child, #discoverBody {
+  #app > header, .view:not(#discoverView), #discoverView > div:first-child, #discoverBody {
     padding-left: var(--gutter); padding-right: var(--gutter);
   }
-  body > .flex > header { padding-top: 28px; }
+  #app > header { padding-top: 28px; }
   .view, #discoverView { max-width: 1280px; }
   .pb-grid { padding-bottom: 48px; }
   .row-scroller { margin-left: calc(-1 * var(--gutter)); margin-right: calc(-1 * var(--gutter)); padding-left: var(--gutter); padding-right: var(--gutter); }

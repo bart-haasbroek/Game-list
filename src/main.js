@@ -3,7 +3,7 @@ import { registerSW } from 'virtual:pwa-register';
 import { initSync, syncNow, schedule as scheduleSync, syncCode, lastSync, syncStatus, enableSync, restoreSync, disableSync, formatCode } from './sync.js';
 import { searchIGDB, searchWikipedia, SourceUnavailable } from './sources.js';
 import {
-  loadDataset, datasetInfo, getEntry, searchDataset, franchiseList, franchiseGames, franchiseCover, popularGames,
+  loadDataset, datasetInfo, getEntry, CURATED_FRANCHISES, searchDataset, franchiseList, franchiseGames, franchiseCover, popularGames,
   upcoming, isFuture, formatRelease, countdown, normalize, findEntry, checkForUpdate, onDatasetUpdate,
 } from './data.js';
 import { resolveCovers, knownCoverUrl, fetchDetails, youtubeId } from './info.js';
@@ -175,6 +175,31 @@ const savePrefs = () => store.save('gl.prefs', prefs);
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const today = () => new Date().toISOString().slice(0, 10);
+
+// ---------- Uitspeeldatum ----------
+// Een uitspeeldatum mag ook alleen een jaartal zijn ("2008" = rond 2008), voor games die je lang geleden speelde.
+const isYearOnly = (d) => /^\d{4}$/.test(String(d || ''));
+const finishedText = (d) => (isYearOnly(d) ? `rond ${d}` : formatRelease(d));
+const releaseYear = (g) => Number(String(g.release || g.year || '').slice(0, 4)) || null;
+// Geschat uitspeeljaar: het releasejaar, of het jaar erna als de game in december uitkwam
+function estimatedFinishYear(g) {
+  const y = releaseYear(g);
+  if (!y) return null;
+  const est = String(g.release || '').slice(5, 7) === '12' ? y + 1 : y;
+  return String(Math.min(est, new Date().getFullYear()));
+}
+// Oude game (2+ jaar) die je niet eerst op "Speel ik" had: waarschijnlijk lang geleden gespeeld
+const OLD_GAME_YEARS = 2;
+const isOldGame = (g) => { const y = releaseYear(g); return Boolean(y && y <= new Date().getFullYear() - OLD_GAME_YEARS); };
+const defaultFinishedAt = (g) => (!g.startedAt && isOldGame(g) ? estimatedFinishYear(g) : today());
+// Eigen oude games waarvan de uitspeeldatum vanzelf is ingevuld (de dag van toevoegen, of nog leeg) en niet
+// door jou gekozen: die kunnen naar het releasejaar. Games die je eerst op "Speel ik" had, blijven staan.
+function autoFinishedCandidates() {
+  const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : null);
+  const near = (a, b) => a && b && Math.abs(new Date(a) - new Date(b)) <= 36 * 3600 * 1000; // tijdzone-speling
+  return games.filter(g => DONE.includes(g.status) && isOldGame(g) && !g.startedAt && estimatedFinishYear(g)
+    && !isYearOnly(g.finishedAt) && (!g.finishedAt || near(g.finishedAt, day(g.addedAt))));
+}
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const online = () => navigator.onLine;
 const average = (list) => {
@@ -542,7 +567,7 @@ function renderLibrary() {
 
 const BROWSE = {
   platforms: { title: 'Platforms', of: (g) => myPlats(g).length ? myPlats(g) : [...new Set((g.platforms || []).map(shortPlatform))] },
-  series: { title: 'Series', of: (g) => g.franchise ? [g.franchise] : [] },
+  series: { title: 'Series', of: (g) => { const f = franchiseOf(g); return f ? [f] : []; } },
   genres: { title: 'Genres', of: (g) => (g.info?.genres?.length ? g.info.genres : g.genres) || [] },
 };
 
@@ -585,7 +610,13 @@ function sortGames(list) {
 
 // ---------- Bibliotheek: filter op franchise ----------
 // Franchise van een eigen game: zoals in de gamedatabase (zelfde namen als in Ontdek), anders wat bij de game staat
-const franchiseOf = (g) => (g.sourceKey && getEntry(g.sourceKey)?.franchise) || g.franchise || null;
+// Alleen de bekende Nintendo-franchises (Mario, Zelda, Pokémon, Donkey Kong …); losse games met een eigen
+// IGDB-"serie" (Tunic, Okami) tellen niet als franchise.
+function franchiseOf(g) {
+  const f = (g.sourceKey && getEntry(g.sourceKey)?.franchise) || g.franchise || null;
+  const c = CURATED_FRANCHISES.find(x => x.name === f || x.alias?.includes(f)) || CURATED_FRANCHISES.find(x => x.re?.test(g.title || ''));
+  return c?.name || null;
+}
 if (!Array.isArray(prefs.libFranchises)) prefs.libFranchises = [];
 if (!Array.isArray(prefs.libStatuses)) prefs.libStatuses = [];
 let libListId = null;
@@ -717,7 +748,7 @@ function heroHTML(g) {
   const [main, edition] = m ? [m[1], m[2]] : [g.title, ''];
   const size = main.length > 44 ? 'text-[24px]' : main.length > 30 ? 'text-[27px]' : 'text-[30px]';
   // Rustig houden: alleen de titel, en bij een uitgespeelde game wanneer
-  const sub = DONE.includes(g.status) && g.finishedAt ? `Uitgespeeld op ${formatRelease(g.finishedAt)}` : '';
+  const sub = DONE.includes(g.status) && g.finishedAt ? `Uitgespeeld ${isYearOnly(g.finishedAt) ? 'rond' : 'op'} ${finishedText(g.finishedAt).replace(/^rond /, '')}` : '';
   const art = g.artwork ? heroImgUrl(g.artwork) : null;
   const cover = coverSrc(g);
   // Onderlaag: de (vage) cover, die er meestal al is; de artwork faadt er rustig overheen zodra hij binnen is.
@@ -824,7 +855,7 @@ function renderHome() {
     ${nintendoUpcoming.length ? homeHead('Binnenkort op Nintendo', 'data-upcoming')
       + rowScroller(nintendoUpcoming.map(e => cardHTML(e, { ref: e.key, sub: countdown(e.release)?.small || '' })).join('')) : ''}
     ${top.length ? homeHead('Mijn hoogste cijfers') + rowScroller(top.map(g => cardHTML(g)).join('')) : ''}
-    ${lastFinished.length ? homeHead('Laatst uitgespeeld', 'data-tab="finished"') + rowScroller(lastFinished.map(g => cardHTML(g, { sub: g.finishedAt ? formatRelease(g.finishedAt) : '' })).join('')) : ''}
+    ${lastFinished.length ? homeHead('Laatst uitgespeeld', 'data-tab="finished"') + rowScroller(lastFinished.map(g => cardHTML(g, { sub: g.finishedAt ? finishedText(g.finishedAt) : '' })).join('')) : ''}
     <div class="mt-6 text-center text-[12px] text-muted">${games.length} ${games.length === 1 ? 'game' : 'games'} in je verzameling${average(games) ? ` · gemiddeld cijfer ${average(games)}` : ''}</div>
   `;
   el.scrollTop = keepScroll;
@@ -1525,7 +1556,8 @@ function swipeDecide(choice) {
       const status = SWIPE_STATUS[choice];
       if (status) {
         const rec = addFromView(e, status);
-        rec.finishedAt = null; // datum onbekend: telt niet mee als "uitgespeeld in <jaar>"
+        // Oude game: rond het releasejaar; nieuwere: datum onbekend (telt dan niet mee als "uitgespeeld in <jaar>")
+        rec.finishedAt = isOldGame(e) ? estimatedFinishYear(e) : null;
         saveGames();
         swipe.history.push({ e, choice, id: rec.id });
         swipe[choice === 'yes' ? 'yes' : 'part']++;
@@ -1627,6 +1659,17 @@ function renderMore() {
         ${stat(games.length, 'games')}${stat(average(games) ?? '–', 'gem. cijfer')}${stat(games.filter(g => g.finishedAt?.startsWith(String(year))).length, `klaar in ${year}`)}
       </div>
     </div>
+    ${(() => {
+      const n = autoFinishedCandidates().length;
+      return n ? `<div>
+      ${label('Uitspeeldatums')}
+      <div class="rounded-2xl bg-surface p-4">
+        <b class="block text-[15px]">${n} oude ${n === 1 ? 'game staat' : 'games staan'} op de dag van toevoegen</b>
+        <p class="mt-1 text-[13px] text-muted">Zet de uitspeeldatum op het releasejaar (bij een release in december het jaar erna), bv. “rond 2007”. Datums die je zelf hebt gekozen blijven staan.</p>
+        <button data-fix-finished class="mt-3 w-full rounded-xl bg-accent px-4 py-2.5 font-bold text-white">Zet op releasejaar</button>
+      </div>
+    </div>` : '';
+    })()}
     <div>
       ${label('Gamedatabase')}
       <div class="rounded-2xl bg-surface p-4">
@@ -1766,6 +1809,16 @@ function showRestore() {
 document.addEventListener('click', async (e) => {
   if (e.target.closest('[data-sync-restore]')) { showRestore(); return; }
   if (e.target.closest('[data-sync-code]')) { showSyncCode(); return; }
+  if (e.target.closest('[data-fix-finished]')) {
+    const list = autoFinishedCandidates();
+    if (!list.length) return;
+    const ok = await pick(`Uitspeeldatum van ${list.length} ${list.length === 1 ? 'game' : 'games'} op het releasejaar zetten?`, [{ value: 'yes', label: 'Zet op releasejaar' }]);
+    if (ok !== 'yes') return;
+    for (const g of list) updateGame(g.id, { finishedAt: estimatedFinishYear(g) });
+    renderMore();
+    toast(`${list.length} ${list.length === 1 ? 'datum' : 'datums'} aangepast`);
+    return;
+  }
   if (e.target.closest('[data-sync-now]')) { await syncNow(); updateSyncStatus(); return; }
   const on = e.target.closest('[data-sync-on]');
   if (on) {
@@ -1905,11 +1958,12 @@ function scoresHTML(critic, playtime, title) {
 // Datumveld: iOS geeft een datumveld een eigen minimale breedte (loopt dan uit zijn kolom) en
 // toont niks als het leeg is; daarom min-w-0, links uitgelijnd en "Kies datum" als het leeg is.
 // leading-[44px] (= de veldhoogte): anders zet iOS de datum bovenin het veld (getest in de iOS-simulator)
+// Alleen een jaartal (bv. "2008")? Dan staat er "Rond 2008"; tik erop om alsnog een precieze datum te kiezen.
 const dateField = (key, text, value) => `<label class="min-w-0 text-xs text-muted">${text}
   <span class="relative mt-1 block">
-    <input type="date" data-date="${key}" value="${value || ''}" required
+    <input type="date" data-date="${key}" value="${isYearOnly(value) ? '' : value || ''}" required
       class="peer block h-11 w-full min-w-0 appearance-none rounded-[10px] bg-surface px-3 text-left text-[15px] leading-[44px] text-ink [&::-webkit-date-and-time-value]:m-0 [&::-webkit-date-and-time-value]:text-left [&:invalid:not(:focus)::-webkit-datetime-edit]:opacity-0">
-    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[15px] text-muted peer-valid:hidden peer-focus:hidden">Kies datum</span>
+    <span class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[15px] ${isYearOnly(value) ? 'text-ink' : 'text-muted'} peer-valid:hidden peer-focus:hidden">${isYearOnly(value) ? `Rond ${value}` : 'Kies datum'}</span>
   </span></label>`;
 
 function renderDetail() {
@@ -2102,7 +2156,7 @@ function addFromView(g, status) {
     status, rating: null, notes: '',
     addedAt: Date.now(),
     startedAt: status === 'playing' ? today() : null,
-    finishedAt: DONE.includes(status) ? today() : null,
+    finishedAt: DONE.includes(status) ? defaultFinishedAt(g) : null,
   };
   games.push(rec);
   saveGames();
@@ -2187,7 +2241,7 @@ $('#detailBody').addEventListener('click', async (e) => {
     } else {
       const patch = { status };
       if (status === 'playing' && !g.startedAt) patch.startedAt = today();
-      if (DONE.includes(status) && !g.finishedAt) patch.finishedAt = today();
+      if (DONE.includes(status) && !g.finishedAt) patch.finishedAt = defaultFinishedAt({ ...g, ...patch });
       updateGame(g.id, patch);
       toast(`Verplaatst naar ${listById[status].label}`);
     }
