@@ -1892,6 +1892,7 @@ function renderDetail() {
     <div class="mt-6">
       ${label(owned ? 'Lijst' : 'Zet op een lijst')}
       ${statusBtns}
+      ${owned && (DONE.includes(g.status) || g.status === 'stopped') ? `<button data-not-played class="mt-2 text-[13px] font-semibold text-muted underline decoration-line underline-offset-4 active:text-ink">Toch niet gespeeld?</button>` : ''}
       ${notOut ? '<p class="mt-1.5 text-[12px] text-muted">Nog niet uit: spelen, uitspelen of stoppen kan pas na de release.</p>' : ''}
     </div>
 
@@ -2037,6 +2038,15 @@ $('#notesDone').addEventListener('click', closeNotes);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#notesScreen').hidden) closeNotes(); });
 
 $('#detailBody').addEventListener('click', async (e) => {
+  if (e.target.closest('[data-not-played]')) {
+    const v = viewOf(currentRef);
+    if (!v?.owned) return;
+    // Cijfer of notities gaan verloren: dan eerst even vragen
+    const hasOwn = v.g.rating != null || (v.g.notes && notesText(v.g.notes).trim());
+    if (hasOwn && await pick(`“${v.g.title}” heeft een cijfer of notities. Toch weghalen als niet gespeeld?`, [{ value: 'yes', label: 'Niet gespeeld' }]) !== 'yes') return;
+    removeOwned(v.g, { notPlayed: true });
+    return;
+  }
   const v = viewOf(currentRef);
   if (!v) return;
   const { g, owned } = v;
@@ -2115,18 +2125,30 @@ $('#detailBody').addEventListener('change', (e) => {
 });
 
 
-$('#deleteBtn').addEventListener('click', async () => {
-  const v = viewOf(currentRef);
-  if (!v?.owned) return;
-  const ok = await pick(`“${v.g.title}” verwijderen uit je lijsten?`, [{ value: 'yes', label: 'Verwijderen' }]);
-  if (ok !== 'yes') return;
-  const key = v.g.sourceKey;
-  games = games.filter(x => x.id !== v.g.id);
+// Game uit je lijsten halen. notPlayed: ook onthouden dat je hem niet gespeeld hebt, zodat hij bij
+// "Wat heb ik gespeeld?" niet meer langskomt (zelfde als naar links vegen).
+function removeOwned(g, { notPlayed = false } = {}) {
+  const key = g.sourceKey;
+  games = games.filter(x => x.id !== g.id);
   saveGames();
+  if (notPlayed && key) { swipedNo.add(key); saveSwipedNo(); }
   render();
-  toast('Verwijderd');
+  toast(notPlayed ? `${g.title}: niet gespeeld` : 'Verwijderd');
   if (key && (getEntry(key) || candidates.get(key))) { currentRef = key; renderDetail(); }
   else hideScreen($('#detailScreen'));
+}
+
+async function askRemove(g) {
+  const choice = await pick(`“${g.title}” uit je lijsten halen?`, [
+    { value: 'notplayed', label: 'Niet gespeeld (komt niet meer langs bij swipen)' },
+    { value: 'yes', label: 'Alleen verwijderen' },
+  ]);
+  if (choice) removeOwned(g, { notPlayed: choice === 'notplayed' });
+}
+
+$('#deleteBtn').addEventListener('click', () => {
+  const v = viewOf(currentRef);
+  if (v?.owned) askRemove(v.g);
 });
 
 // ---------- Trailer-popup ----------
