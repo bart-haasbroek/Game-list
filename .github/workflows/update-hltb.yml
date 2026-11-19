@@ -1,12 +1,17 @@
-# Haalt eens per maand de speeltijden op bij HowLongToBeat (voor de bekendere games), schrijft
-# public/data/hltb.json en commit dat naar main (Netlify deployt dan vanzelf).
-# Duurt een paar uur, omdat het rustig aan doet (1 zoekopdracht per seconde). Geen secrets nodig.
+# Speeltijden van HowLongToBeat bijwerken en public/data/hltb.json committen naar main als er iets veranderd is.
+# Normaal alleen games die nog nooit gezocht zijn + releases van het afgelopen jaar (een paar minuten); twee keer
+# per jaar vanzelf alles opnieuw (een paar uur, 1 zoekopdracht per seconde). Geen secrets nodig.
 name: Speeltijden bijwerken (HowLongToBeat)
 
 on:
   schedule:
     - cron: '0 2 3 * *' # de 3e van elke maand, 02:00 UTC
   workflow_dispatch:
+    inputs:
+      full:
+        description: 'Alles opnieuw ophalen (een paar uur)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,7 +32,7 @@ jobs:
           cache: yarn
       - run: yarn install --frozen-lockfile
       - name: HowLongToBeat ophalen
-        run: node scripts/build-hltb.mjs
+        run: node scripts/build-hltb.mjs ${{ inputs.full && '--full' || '' }}
       - name: Committen als er iets veranderd is
         run: |
           if git diff --quiet -- public/data/hltb.json; then echo "Geen wijzigingen"; exit 0; fi

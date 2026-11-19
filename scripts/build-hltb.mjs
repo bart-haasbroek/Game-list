@@ -1,7 +1,9 @@
 // Haalt speeltijden op bij HowLongToBeat voor de bekendere games uit de gamedatabase
 // (uitgebracht en populariteit >= MIN_POP) en bewaart ze per IGDB-id.
 //
-// Draaien:  yarn hltb                 -> schrijft public/data/hltb.json
+// Draaien:  yarn hltb                 -> bijwerken: alleen games die nog nooit gezocht zijn + releases van het
+//                                        afgelopen jaar (die uren schuiven nog); schrijft public/data/hltb.json
+//           yarn hltb --full          -> alles opnieuw (gebeurt ook vanzelf als de vorige keer > half jaar is)
 //           yarn hltb --limit 50      -> alleen de 50 populairste (om te testen)
 //           yarn hltb --match "mario|zelda" -> alleen games waarvan titel of franchise hierop past (regex)
 //           Een gedeeltelijke run (--limit/--match) vult de bestaande data aan in plaats van die te vervangen.
@@ -23,6 +25,7 @@ const limit = limitArg > 0 ? Number(process.argv[limitArg + 1]) : Infinity;
 const matchArg = process.argv.indexOf('--match');
 const match = matchArg > 0 ? new RegExp(process.argv[matchArg + 1], 'i') : null;
 const partial = Boolean(match) || limit !== Infinity;
+const FULL_EVERY_DAYS = 175; // twee keer per jaar alles opnieuw
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ---------- 1. Welke games? ----------
@@ -37,7 +40,18 @@ const wanted = data.games
 
 // Vorige resultaten: blijven staan voor games waarbij het zoeken nu mislukt
 const prevText = await readFile(FILE, 'utf8').catch(() => null);
-const prev = prevText ? JSON.parse(prevText).games || {} : {};
+const prevDoc = prevText ? JSON.parse(prevText) : {};
+const prev = prevDoc.games || {};
+// Games die HLTB niet kent (id -> datum): niet elke maand opnieuw zoeken, alleen bij een volledige ronde
+const prevTried = prevDoc.tried || {};
+const full = !partial && (process.argv.includes('--full') || !prevDoc.lastFull || Date.now() - Date.parse(prevDoc.lastFull) > FULL_EVERY_DAYS * 864e5);
+const incremental = !partial && !full;
+if (incremental) {
+  const yearAgo = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const all = wanted.splice(0);
+  wanted.push(...all.filter(g => (!prev[g[0]] && !prevTried[g[0]]) || String(g[2]) >= yearAgo));
+}
+console.log(full ? 'Volledige ronde' : incremental ? `Bijwerken (vorige volledige ronde: ${prevDoc.lastFull.slice(0, 10)})` : 'Gedeeltelijke ronde');
 
 // ---------- 2. Zoeken ----------
 console.log(`HowLongToBeat: ${wanted.length} games (populariteit >= ${MIN_POP}), ±${Math.round(wanted.length * DELAY / 60000)} min`);
@@ -45,7 +59,8 @@ const started = Date.now();
 // Gedeeltelijke run: alles wat al bekend was blijft staan, alleen de gezochte games worden vernieuwd
 // Games die niet (meer) in de database staan (bv. weggefilterde fangames/homebrew) vallen weg
 const known = new Set(data.games.map(g => String(g[0])));
-const games = partial ? Object.fromEntries(Object.entries(prev).filter(([id]) => known.has(id))) : {};
+const games = full ? {} : Object.fromEntries(Object.entries(prev).filter(([id]) => known.has(id)));
+const tried = full ? {} : Object.fromEntries(Object.entries(prevTried).filter(([id]) => known.has(id)));
 let found = 0, errors = 0;
 for (const [i, g] of wanted.entries()) {
   const [id, title, release] = g;
@@ -54,8 +69,8 @@ for (const [i, g] of wanted.entries()) {
     let m = pickMatch(await hltbSearch(title), title, year);
     const alt = !m && altTitle(title);
     if (alt) { await sleep(DELAY); m = pickMatch(await hltbSearch(alt), alt, null); }
-    if (m && (m.comp_main || m.comp_plus || m.comp_100)) { games[id] = hltbRow(m); found++; }
-    else delete games[id];
+    if (m && (m.comp_main || m.comp_plus || m.comp_100)) { games[id] = hltbRow(m); delete tried[id]; found++; }
+    else { delete games[id]; tried[id] = today; }
   } catch (e) {
     errors++;
     if (prev[id]) games[id] = prev[id];
@@ -69,13 +84,18 @@ for (const [i, g] of wanted.entries()) {
 console.log(`${found} van ${wanted.length} gevonden (${errors} fouten) in ${Math.round((Date.now() - started) / 60000)} min`);
 
 // ---------- 3. Opslaan ----------
+const now = new Date().toISOString();
 const out = {
-  version: 1, source: 'howlongtobeat', generated: new Date().toISOString(),
-  fields: ['hltbId', 'main', 'plus', 'complete', 'players'], games,
+  version: 1, source: 'howlongtobeat', generated: now, lastFull: full ? now : prevDoc.lastFull || null,
+  fields: ['hltbId', 'main', 'plus', 'complete', 'players'], games, tried,
 };
 const text = JSON.stringify(out);
+// Bijwerken zonder nieuwe of andere speeltijden: niets wegschrijven (dan ook geen commit/deploy)
+if (incremental && JSON.stringify(games) === JSON.stringify(prev) && Object.keys(tried).length === Object.keys(prevTried).length) {
+  console.log('Niets veranderd: bestand blijft zoals het is.'); process.exit(0);
+}
 const before = Object.keys(prev).length;
-if (!partial && before && Object.keys(games).length < before * 0.8 && !process.argv.includes('--force')) {
+if (full && before && Object.keys(games).length < before * 0.8 && !process.argv.includes('--force')) {
   console.error(`Gestopt: ${Object.keys(games).length} is veel minder dan de vorige keer (${before}). Oude data blijft staan.`);
   process.exit(1);
 }

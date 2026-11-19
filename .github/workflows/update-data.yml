@@ -1,7 +1,8 @@
-# Werkt de gamedatabase bij: haalt alle Nintendo-games uit IGDB, schrijft public/data/games.json (+ games-meta.json)
-# en commit dat naar main. Netlify deployt daarna vanzelf; de app ziet de nieuwe versie via /data/games-meta.json.
-# Draait de 1e en 22e van elke maand (± elke 3 weken), via de knop "Nu bijwerken" in de app, en na een push
-# die de manier van ophalen/filteren verandert.
+# Werkt de gamedatabase bij en commit public/data/games.json (+ games-meta.json) naar main als er iets veranderd
+# is. Netlify deployt daarna vanzelf; de app ziet de nieuwe versie via /data/games-meta.json.
+# Normaal alleen de wijzigingen (gewijzigde, aangekondigde en recente games: een paar verzoeken); ± elk kwartaal
+# vanzelf alles opnieuw. Draait de 1e van elke maand, via de knop "Nu bijwerken" in de app, en na een push die
+# de manier van ophalen/filteren verandert (dan volledig).
 #
 # Secrets (GitHub > Settings > Secrets and variables > Actions):
 #   TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET  - IGDB (zelfde als in je lokale .env)
@@ -9,8 +10,13 @@ name: Gamedata bijwerken
 
 on:
   schedule:
-    - cron: '0 4 1,22 * *' # de 1e en 22e van de maand, 04:00 UTC
+    - cron: '0 4 1 * *' # de 1e van elke maand, 04:00 UTC
   workflow_dispatch: # handmatig: knop in de app (via /api/refresh) of in GitHub > Actions
+    inputs:
+      full:
+        description: 'Alles opnieuw ophalen (in plaats van alleen de wijzigingen)'
+        type: boolean
+        default: false
   push: # meteen opnieuw bouwen als de manier van ophalen/filteren verandert
     branches: [main]
     paths:
@@ -36,7 +42,7 @@ jobs:
           cache: yarn
       - run: yarn install --frozen-lockfile
       - name: IGDB ophalen
-        run: node scripts/build-data.mjs
+        run: node scripts/build-data.mjs ${{ (inputs.full || github.event_name == 'push') && '--full' || '' }}
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}

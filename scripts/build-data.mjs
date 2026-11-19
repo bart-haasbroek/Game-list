@@ -1,12 +1,14 @@
 // Bouwt de gamedatabase uit IGDB: alle (hoofd)games op Nintendo-platforms met titel, releasedatum,
 // platforms, cover, franchise, genres en populariteit.
 //
-// Draaien:  yarn data           -> schrijft public/data/games.json + games-meta.json
+// Draaien:  yarn data           -> bijwerken: alleen gewijzigde, aangekondigde en recente games ophalen en
+//                                  verwerken in public/data/games.json (+ games-meta.json)
+//           yarn data --full    -> alles opnieuw (gebeurt ook vanzelf als de laatste volledige keer > 85 dagen is)
 //           yarn data --force   -> ook als er opeens veel minder games zijn dan de vorige keer
 // Nodig:    TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET   (lokaal in .env, in GitHub als secrets)
 //
-// De 1e en 22e van elke maand via .github/workflows/update-data.yml (of de knop in de app): die commit de
-// bestanden naar GitHub, waarna Netlify de site opnieuw deployt. Geen Netlify Blobs meer nodig voor de data.
+// Elke maand via .github/workflows/update-data.yml (of de knop in de app): die commit de bestanden naar
+// GitHub als er iets veranderd is, waarna Netlify de site opnieuw deployt.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { igdb, igdbConfigured, NINTENDO_PLATFORMS } from '../netlify/lib/igdb.mjs';
@@ -63,6 +65,20 @@ function releaseOf(g) {
   return full.slice(0, 4); // jaar of kwartaal
 }
 
+// ---------- 0. Volledig of bijwerken? ----------
+const FULL_EVERY_DAYS = 85; // ± elk kwartaal alles opnieuw (opruimen, populariteit, filterwijzigingen)
+const prev = await readFile(FILE, 'utf8').then(t => JSON.parse(t)).catch(() => null);
+const lastFull = prev?.lastFull || prev?.generated || null;
+const full = process.argv.includes('--full') || !prev?.games?.length
+  || !lastFull || Date.now() - Date.parse(lastFull) > FULL_EVERY_DAYS * 864e5;
+// Bijwerken: wat sinds de vorige keer in IGDB is gewijzigd (2 dagen marge), plus alles wat nog moet komen of
+// net uit is (releasedatums en covers van zulke games veranderen vaak). Krijgt een game zonder datum er een,
+// dan telt dat in IGDB als wijziging van de game zelf.
+const unix = (d) => Math.floor(Date.parse(d) / 1000);
+const recentFrom = Math.floor(Date.now() / 1000) - 120 * 86400;
+const extra = full ? '' : ` & (updated_at > ${unix(prev.generated) - 2 * 86400} | first_release_date > ${recentFrom})`;
+console.log(full ? `Volledig ophalen${lastFull ? ` (vorige keer volledig: ${lastFull.slice(0, 10)})` : ''}` : `Bijwerken sinds ${prev.generated.slice(0, 10)}`);
+
 // ---------- 1. Ophalen ----------
 const started = Date.now();
 const raw = [];
@@ -73,7 +89,7 @@ for (;;) {
   release_dates.date, release_dates.date_format, release_dates.platform,
   franchise.name, franchises.name, collections.name, genres.name, total_rating_count, hypes, keywords;
 where platforms = (${PLATFORM_IDS.join(',')}) & version_parent = null & game_type = (${GAME_TYPES.join(',')})
-  & (cover != null | first_release_date != null) & id > ${lastId};
+  & (cover != null | first_release_date != null)${extra} & id > ${lastId};
 sort id asc;
 limit 500;`);
   if (!page.length) break;
@@ -86,14 +102,17 @@ console.log(` ${raw.length} games in ${Math.round((Date.now() - started) / 1000)
 
 // ---------- 2. Compact formaat ----------
 // games: [igdbId, titel, release|0, [platform-index], coverId|0, franchise-index|-1, [genre-index], populariteit]
-const platforms = [], franchises = [], genres = [];
+// Bijwerken: de bestaande lijsten (platforms/franchises/genres) houden, zodat de indexen blijven kloppen
+const platforms = full ? [] : [...prev.platforms], franchises = full ? [] : [...prev.franchises], genres = full ? [] : [...prev.genres];
 const idx = (list, v) => { let i = list.indexOf(v); if (i < 0) i = list.push(v) - 1; return i; };
 
 let skipped = 0;
-const games = raw.map(g => {
+const removeIds = new Set(); // bij bijwerken: games die nu (alsnog) wegvallen
+const fresh = raw.map(g => {
   const plats = [...new Set((g.platforms || []).map(p => NINTENDO_PLATFORMS[p]).filter(Boolean))];
   const pop = (g.total_rating_count || 0) + (g.hypes || 0);
-  if (unofficial(g, plats, releaseOf(g), pop)) { skipped++; return null; }
+  if (unofficial(g, plats, releaseOf(g), pop)) { skipped++; removeIds.add(g.id); return null; }
+  if (!plats.length) { removeIds.add(g.id); return null; }
   const franchise = g.franchise?.name || g.franchises?.[0]?.name || g.collections?.[0]?.name || null;
   return [
     g.id,
@@ -105,16 +124,32 @@ const games = raw.map(g => {
     (g.genres || []).map(x => idx(genres, x.name)),
     pop,
   ];
-}).filter(g => g && g[3].length);
+}).filter(Boolean);
 console.log(`${skipped} onofficiële games / homebrew overgeslagen`);
 
-const data = { version: 3, source: 'igdb', generated: new Date().toISOString(), platforms, franchises, genres, games };
+// Bijwerken: verwerken in de bestaande lijst (vervangen, toevoegen, weghalen); volledig: de nieuwe lijst
+let games = fresh, added = 0, changed = 0;
+if (!full) {
+  const byId = new Map(prev.games.map(r => [r[0], r]));
+  for (const id of removeIds) byId.delete(id);
+  for (const r of fresh) {
+    const old = byId.get(r[0]);
+    if (!old) added++; else if (JSON.stringify(old) !== JSON.stringify(r)) changed++;
+    byId.set(r[0], r);
+  }
+  games = [...byId.values()].sort((a, b) => a[0] - b[0]);
+  const removed = prev.games.length + added - games.length;
+  console.log(`${added} nieuw, ${changed} gewijzigd, ${removed} weggehaald`);
+  if (!added && !changed && !removed) { console.log('Niets veranderd: bestanden blijven zoals ze zijn.'); process.exit(0); }
+}
+
+const now = new Date().toISOString();
+const data = { version: 3, source: 'igdb', generated: now, lastFull: full ? now : lastFull, platforms, franchises, genres, games };
 const text = JSON.stringify(data);
 console.log(`${games.length} games, ${(text.length / 1024 / 1024).toFixed(1)} MB`);
 
 // ---------- 3. Opslaan ----------
 // Veiligheid: niet overschrijven als IGDB opeens veel minder games teruggeeft (storing)
-const prev = await readFile(FILE, 'utf8').then(t => JSON.parse(t)).catch(() => null);
 const prevCount = prev?.games?.length || 0;
 if (prevCount && games.length < prevCount * 0.8 && !process.argv.includes('--force')) {
   console.error(`Gestopt: ${games.length} games is veel minder dan de vorige keer (${prevCount}). Oude data blijft staan.`);

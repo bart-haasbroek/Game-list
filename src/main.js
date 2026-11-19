@@ -1682,7 +1682,7 @@ function renderMore() {
           </div>
           <button id="refreshBtn" class="flex-none rounded-xl bg-accent px-4 py-2.5 font-bold text-white disabled:opacity-50" ${refreshing ? 'disabled' : ''}>${refreshing ? 'Bezig…' : 'Nu bijwerken'}</button>
         </div>
-        <p class="mt-2 text-[12px] text-muted">Bron: IGDB. Wordt rond de 1e en 22e van elke maand automatisch bijgewerkt.</p>
+        <p class="mt-2 text-[12px] text-muted">Bron: IGDB. Wordt elke maand automatisch bijgewerkt.</p>
       </div>
     </div>
     <div>
