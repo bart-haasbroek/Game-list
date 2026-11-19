@@ -3,7 +3,6 @@
 //   POST /api/refresh -> start een nieuwe run
 // Nodig in Netlify: GITHUB_TOKEN (fine-grained token, alleen deze repo, "Actions: Read and write").
 // Optioneel: GITHUB_REPO (standaard bart-haasbroek/Game-list), GITHUB_BRANCH (standaard main).
-import { getStore } from '@netlify/blobs';
 import { json } from '../lib/igdb.mjs';
 
 const REPO = process.env.GITHUB_REPO || 'bart-haasbroek/Game-list';
@@ -30,7 +29,9 @@ async function latestRun() {
 }
 
 export default async (req) => {
-  const meta = await (async () => getStore('gamedata').get('meta', { type: 'json' }))().catch(() => null);
+  // Laatste versie van de data: het kleine meta-bestand van de site zelf (Netlify zet de eigen url in URL)
+  const base = process.env.URL || new URL(req.url).origin;
+  const meta = await fetch(`${base}/data/games-meta.json`, { cache: 'no-store' }).then(r => (r.ok ? r.json() : null)).catch(() => null);
   const noCache = { 'cache-control': 'no-store' };
   if (!process.env.GITHUB_TOKEN) {
     return json({ meta, run: null, error: 'Handmatig bijwerken is nog niet ingesteld (GITHUB_TOKEN ontbreekt in Netlify)' }, req.method === 'POST' ? 501 : 200, noCache);

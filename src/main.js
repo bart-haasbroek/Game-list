@@ -1328,7 +1328,9 @@ const swipeName = (set) => (set === SWIPE_TOP ? 'Populair' : set);
 
 function swipeCandidates(set) {
   const list = set === SWIPE_TOP ? popularGames(400) : franchiseGames(set);
-  return list.filter(e => !isFuture(e.release) && !ownedBy(e.key) && !swipedNo.has(e.key))
+  // Alleen games met enige bekendheid (IGDB-beoordelingen of hype): zonder dat zijn het vrijwel altijd obscure
+  // titels (Japanse satellietgames, Game & Watch-heruitgaven, apps) die je toch niet gespeeld hebt
+  return list.filter(e => !isFuture(e.release) && e.pop > 0 && !ownedBy(e.key) && !swipedNo.has(e.key))
     .sort((a, b) => b.pop - a.pop || String(a.release).localeCompare(String(b.release)));
 }
 
@@ -1680,7 +1682,7 @@ function renderMore() {
           </div>
           <button id="refreshBtn" class="flex-none rounded-xl bg-accent px-4 py-2.5 font-bold text-white disabled:opacity-50" ${refreshing ? 'disabled' : ''}>${refreshing ? 'Bezig…' : 'Nu bijwerken'}</button>
         </div>
-        <p class="mt-2 text-[12px] text-muted">Bron: IGDB. Wordt elke maandag automatisch bijgewerkt.</p>
+        <p class="mt-2 text-[12px] text-muted">Bron: IGDB. Wordt rond de 1e en 22e van elke maand automatisch bijgewerkt.</p>
       </div>
     </div>
     <div>
@@ -2421,8 +2423,14 @@ async function startRefresh() {
       const run = st.run;
       if (!run || Date.parse(run.createdAt) < since || run.status !== 'completed') continue;
       if (run.conclusion !== 'success') throw new Error('Bijwerken mislukt');
-      const changed = await checkForUpdate().catch(() => false);
-      toast(changed ? 'Gamedatabase bijgewerkt' : 'Gamedatabase was al up-to-date');
+      // De Action commit de nieuwe data; Netlify deployt daarna nog (± 1–2 minuten). Even blijven kijken.
+      setRefreshStatus('Nieuwe data wordt online gezet… (± 2 minuten)');
+      let changed = false;
+      for (let i = 0; i < 18 && !changed; i++) {
+        changed = await checkForUpdate().catch(() => false);
+        if (!changed) await new Promise(r => setTimeout(r, 10000));
+      }
+      toast(changed ? 'Gamedatabase bijgewerkt' : 'Geen nieuwe games gevonden');
       break;
     }
   } catch (e) {

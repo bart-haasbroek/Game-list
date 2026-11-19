@@ -1,6 +1,6 @@
-# Haalt eens per maand de speeltijden op bij HowLongToBeat (voor de bekendere games) en zet ze in Netlify Blobs.
-# Duurt een paar uur, omdat het rustig aan doet (1 zoekopdracht per seconde).
-# Secrets: NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID (dezelfde als bij update-data.yml)
+# Haalt eens per maand de speeltijden op bij HowLongToBeat (voor de bekendere games), schrijft
+# public/data/hltb.json en commit dat naar main (Netlify deployt dan vanzelf).
+# Duurt een paar uur, omdat het rustig aan doet (1 zoekopdracht per seconde). Geen secrets nodig.
 name: Speeltijden bijwerken (HowLongToBeat)
 
 on:
@@ -8,8 +8,11 @@ on:
     - cron: '0 2 3 * *' # de 3e van elke maand, 02:00 UTC
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
-  group: update-hltb
+  group: data-commit
   cancel-in-progress: false
 
 jobs:
@@ -23,8 +26,14 @@ jobs:
           node-version: 22
           cache: yarn
       - run: yarn install --frozen-lockfile
-      - name: HowLongToBeat ophalen en uploaden naar Netlify Blobs
+      - name: HowLongToBeat ophalen
         run: node scripts/build-hltb.mjs
-        env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      - name: Committen als er iets veranderd is
+        run: |
+          if git diff --quiet -- public/data/hltb.json; then echo "Geen wijzigingen"; exit 0; fi
+          git config user.name "gamedata-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/hltb.json
+          git commit -m "Speeltijden bijgewerkt (HowLongToBeat)"
+          git pull --rebase origin main
+          git push origin HEAD:main

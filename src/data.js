@@ -3,7 +3,8 @@
 // Eigen franchiselijst: volgorde = volgorde in Ontdek. `re` herkent de franchise aan de titel,
 // `alias` koppelt franchise-namen uit IGDB aan deze franchise.
 export const CURATED_FRANCHISES = [
-  { name: 'Mario', re: /\bmario\b|\bluigi\b|\bpeach\b|\bbowser\b/i, alias: ['Mario', 'Super Mario', 'Mario Kart', 'Mario Party', 'Paper Mario', 'Mario & Luigi', 'Luigi', 'Mario Tennis', 'Mario Golf', 'Mario Sports'] },
+  // Mario: niet los 'peach' (dan kwam het anime-spel 'Wedding Peach' erbij), wel 'Princess Peach'
+  { name: 'Mario', re: /\bmario\b|\bluigi\b|princess peach|\bbowser\b/i, alias: ['Mario', 'Super Mario', 'Mario Kart', 'Mario Party', 'Paper Mario', 'Mario & Luigi', 'Luigi', 'Mario Tennis', 'Mario Golf', 'Mario Sports'] },
   { name: 'Zelda', re: /zelda|hyrule/i, alias: ['The Legend of Zelda'] },
   { name: 'Pokémon', re: /pok[eé]mon|pikachu/i, alias: ['Pokémon'] },
   { name: 'Kirby', re: /\bkirby/i, alias: ['Kirby'] },
@@ -102,12 +103,14 @@ let meta = null;
 let loading = null;
 
 // ---------- Laden ----------
-// Bron: /api/games (Netlify Blobs, wekelijks bijgewerkt uit IGDB). Een kopie staat in Cache Storage,
-// zodat de app offline werkt en direct start; daarna kijkt de app via /api/games-meta of er nieuwe data is.
+// Bron: /data/games.json (± elke 3 weken bijgewerkt uit IGDB door een GitHub Action). Een kopie staat in Cache Storage,
+// zodat de app offline werkt en direct start; daarna kijkt de app via /data/games-meta.json of er nieuwe data is.
 // Reserve: /data/games.json in de app zelf (bv. met `yarn dev`, of als Blobs nog leeg is).
-const DATA_URL = '/api/games';
-const META_URL = '/api/games-meta';
-const FALLBACK_URL = '/data/games.json';
+// De gamedatabase staat als bestand in de site (door de GitHub Action gecommit en door Netlify gedeployd).
+// games-meta.json is klein: daarmee zien we goedkoop of er een nieuwere versie is.
+const DATA_URL = '/data/games.json';
+const META_URL = '/data/games-meta.json';
+const FALLBACK_URL = DATA_URL;
 const DATA_CACHE = 'gamedata-v1';
 const IGDB_IMG = (id) => `https://images.igdb.com/igdb/image/upload/t_cover_big_2x/${id}.jpg`;
 

@@ -1,28 +1,21 @@
 // Bouwt de gamedatabase uit IGDB: alle (hoofd)games op Nintendo-platforms met titel, releasedatum,
 // platforms, cover, franchise, genres en populariteit.
 //
-// Draaien:  yarn data              -> uploadt naar Netlify Blobs (als NETLIFY_AUTH_TOKEN + NETLIFY_SITE_ID er zijn),
-//                                     anders schrijft het public/data/games.json
-//           yarn data --write-file -> schrijft (ook) public/data/games.json (de reservekopie in de app)
+// Draaien:  yarn data           -> schrijft public/data/games.json + games-meta.json
+//           yarn data --force   -> ook als er opeens veel minder games zijn dan de vorige keer
 // Nodig:    TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET   (lokaal in .env, in GitHub als secrets)
 //
-// Elke maandag automatisch via .github/workflows/update-data.yml, of handmatig via de knop in de app.
+// De 1e en 22e van elke maand via .github/workflows/update-data.yml (of de knop in de app): die commit de
+// bestanden naar GitHub, waarna Netlify de site opnieuw deployt. Geen Netlify Blobs meer nodig voor de data.
 
-import { writeFile } from 'node:fs/promises';
-import { getStore } from '@netlify/blobs';
+import { readFile, writeFile } from 'node:fs/promises';
 import { igdb, igdbConfigured, NINTENDO_PLATFORMS } from '../netlify/lib/igdb.mjs';
 
 const FILE = new URL('../public/data/games.json', import.meta.url);
-const { NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID } = process.env;
-const upload = Boolean(NETLIFY_AUTH_TOKEN && NETLIFY_SITE_ID);
-const writeFileToo = process.argv.includes('--write-file') || !upload;
+const META_FILE = new URL('../public/data/games-meta.json', import.meta.url);
 
 if (!igdbConfigured()) {
   console.error('TWITCH_CLIENT_ID / TWITCH_CLIENT_SECRET ontbreken.');
-  process.exit(1);
-}
-if (process.env.CI && !upload) {
-  console.error('NETLIFY_AUTH_TOKEN / NETLIFY_SITE_ID ontbreken: kan de data niet uploaden.');
   process.exit(1);
 }
 
@@ -120,19 +113,14 @@ const text = JSON.stringify(data);
 console.log(`${games.length} games, ${(text.length / 1024 / 1024).toFixed(1)} MB`);
 
 // ---------- 3. Opslaan ----------
-if (upload) {
-  const store = getStore({ name: 'gamedata', siteID: NETLIFY_SITE_ID, token: NETLIFY_AUTH_TOKEN });
-  // Veiligheid: niet overschrijven als IGDB opeens veel minder games teruggeeft (storing)
-  const prev = await store.get('meta', { type: 'json' }).catch(() => null);
-  if (prev?.count && games.length < prev.count * 0.8 && !process.argv.includes('--force')) {
-    console.error(`Gestopt: ${games.length} games is veel minder dan de vorige keer (${prev.count}). Oude data blijft staan.`);
-    process.exit(1);
-  }
-  await store.set('games', text);
-  await store.setJSON('meta', { generated: data.generated, count: games.length, source: 'igdb' });
-  console.log('Geüpload naar Netlify Blobs (store "gamedata").');
+// Veiligheid: niet overschrijven als IGDB opeens veel minder games teruggeeft (storing)
+const prev = await readFile(FILE, 'utf8').then(t => JSON.parse(t)).catch(() => null);
+const prevCount = prev?.games?.length || 0;
+if (prevCount && games.length < prevCount * 0.8 && !process.argv.includes('--force')) {
+  console.error(`Gestopt: ${games.length} games is veel minder dan de vorige keer (${prevCount}). Oude data blijft staan.`);
+  process.exit(1);
 }
-if (writeFileToo) {
-  await writeFile(FILE, text);
-  console.log('Geschreven naar public/data/games.json');
-}
+await writeFile(FILE, text);
+// Klein bestand waarmee de app goedkoop ziet of er een nieuwere versie is
+await writeFile(META_FILE, JSON.stringify({ generated: data.generated, count: games.length, source: 'igdb' }));
+console.log('Geschreven naar public/data/games.json en games-meta.json');

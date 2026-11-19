@@ -1,16 +1,15 @@
-# Werkt de gamedatabase bij: haalt alle Nintendo-games uit IGDB en zet ze in Netlify Blobs.
-# Geen nieuwe deploy nodig: de app ziet de nieuwe data via /api/games-meta.
-# Draait elke maandag, via de knop in de app, en vanzelf na een push die build-data.mjs of igdb.mjs wijzigt.
+# Werkt de gamedatabase bij: haalt alle Nintendo-games uit IGDB, schrijft public/data/games.json (+ games-meta.json)
+# en commit dat naar main. Netlify deployt daarna vanzelf; de app ziet de nieuwe versie via /data/games-meta.json.
+# Draait de 1e en 22e van elke maand (± elke 3 weken), via de knop "Nu bijwerken" in de app, en na een push
+# die de manier van ophalen/filteren verandert.
 #
 # Secrets (GitHub > Settings > Secrets and variables > Actions):
-#   TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET  - IGDB
-#   NETLIFY_AUTH_TOKEN                      - Netlify > User settings > Applications > Personal access tokens
-#   NETLIFY_SITE_ID                         - Netlify > Site configuration > General > Site ID
+#   TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET  - IGDB (zelfde als in je lokale .env)
 name: Gamedata bijwerken
 
 on:
   schedule:
-    - cron: '0 4 * * 1' # elke maandag 04:00 UTC
+    - cron: '0 4 1,22 * *' # de 1e en 22e van de maand, 04:00 UTC
   workflow_dispatch: # handmatig: knop in de app (via /api/refresh) of in GitHub > Actions
   push: # meteen opnieuw bouwen als de manier van ophalen/filteren verandert
     branches: [main]
@@ -18,8 +17,11 @@ on:
       - scripts/build-data.mjs
       - netlify/lib/igdb.mjs
 
+permissions:
+  contents: write # om de nieuwe data te committen
+
 concurrency:
-  group: update-data
+  group: data-commit # niet tegelijk met de speeltijden-workflow committen
   cancel-in-progress: false
 
 jobs:
@@ -33,10 +35,17 @@ jobs:
           node-version: 22
           cache: yarn
       - run: yarn install --frozen-lockfile
-      - name: IGDB ophalen en uploaden naar Netlify Blobs
+      - name: IGDB ophalen
         run: node scripts/build-data.mjs
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      - name: Committen als er iets veranderd is
+        run: |
+          if git diff --quiet -- public/data/games.json; then echo "Geen nieuwe games"; exit 0; fi
+          git config user.name "gamedata-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/games.json public/data/games-meta.json
+          git commit -m "Gamedata bijgewerkt ($(node -p "require('./public/data/games-meta.json').count") games)"
+          git pull --rebase origin main
+          git push origin HEAD:main

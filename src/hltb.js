@@ -1,8 +1,8 @@
 // Speeltijden van HowLongToBeat per IGDB-game (maandelijks opgehaald door scripts/build-hltb.mjs).
-// Bron: /api/hltb (Netlify Blobs), met een kopie in Cache Storage voor offline; reserve: /data/hltb.json.
+// Bron: /data/hltb.json (door de GitHub Action gecommit), met een kopie in Cache Storage voor offline.
 
-const URL_API = '/api/hltb';
-const URL_FILE = '/data/hltb.json';
+const URL_API = '/data/hltb.json';
+const URL_FILE = URL_API;
 const CACHE = 'gamedata-v1';
 const MIN_PLAYERS = 3; // minder spelers: te weinig om op te vertrouwen
 
