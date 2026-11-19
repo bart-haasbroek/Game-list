@@ -26,7 +26,7 @@ const ICONS = {
   wishlist: svg('<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/>'),
   library: svg('<rect x="4" y="8" width="16" height="13" rx="2.5"/><path d="M6.5 5h11M9 2h6"/>'),
   discover: svg('<circle cx="6" cy="16" r="4"/><circle cx="18" cy="16" r="4"/><path d="M10 16a2 2 0 0 1 4 0"/><path d="M2.3 14.5 5 6a2 2 0 0 1 3.8.4L10 13M21.7 14.5 19 6a2 2 0 0 0-3.8.4L14 13"/>'),
-  stopped: svg('<circle cx="12" cy="12" r="10"/><path d="M9 9h6v6H9z"/>'),
+  stopped: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'), // Gespeeld (klok/geschiedenis)
   all: svg('<rect x="7" y="7" width="13" height="14" rx="2"/><path d="M4 17V6a2 2 0 0 1 2-2h10"/>'),
   platforms: svg('<path d="M6 11h4M8 9v4"/><path d="M15 12h.01M18 10h.01"/><path d="M17.3 5H6.7a4 4 0 0 0-4 3.6C2.6 9.4 2 14.5 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.4-1.4A2 2 0 0 1 9.8 16h4.4a2 2 0 0 1 1.4.6L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.5-.6-6.6-.7-7.3A4 4 0 0 0 17.3 5z"/>'),
   series: svg('<rect x="4" y="9" width="16" height="12" rx="2"/><path d="M6 6h12M8 3h8"/>'),
@@ -45,12 +45,18 @@ const LISTS = [
   { id: 'backlog',    label: 'Op de plank', short: 'Op de plank', empty: 'Games die je hebt maar nog niet gespeeld hebt komen hier.' },
   { id: 'wishlist',   label: 'Wishlist',    short: 'Wishlist',   empty: 'Je wishlist is leeg. Aangekondigde games krijgen hier een afteller.' },
   { id: 'finished',   label: 'Uitgespeeld', short: 'Klaar',      empty: 'Nog niks uitgespeeld.' },
-  { id: 'completed',  label: 'Compleet',    short: '100%',       empty: 'Games die je helemaal (100%) hebt uitgespeeld komen hier.' },
-  { id: 'stopped',    label: 'Gestopt',     short: 'Gestopt',    empty: 'Games waar je mee gestopt bent komen hier.' },
+  { id: 'completed',  label: '100% uitgespeeld', short: '100%', tile: '100%', empty: 'Games die je helemaal (100%) hebt uitgespeeld komen hier.' },
+  // 'stopped' heet in de app "Gespeeld": games die je (af en toe) speelt of gespeeld hebt zonder ze uit te spelen.
+  // De id blijft 'stopped', zodat bestaande lijsten, sync en back-ups gewoon blijven werken.
+  { id: 'stopped',    label: 'Gespeeld',    short: 'Gespeeld',   empty: 'Games die je gespeeld hebt zonder ze uit te spelen (zoals Animal Crossing of Mario Party) komen hier.' },
 ];
 // Kleur per lijst (tegels in de Bibliotheek)
-const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', stopped: '#b5776b' };
-const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'finished', 'completed', 'stopped'];
+const LIST_COLORS = { playing: '#5b8cff', backlog: '#e9edf5', wishlist: '#ff5c9a', finished: '#4fd18b', completed: '#b48cff', stopped: '#38bdf8' };
+// Gespeeld → Uitgespeeld → 100%: van los naar helemaal
+const LIBRARY_ORDER = ['playing', 'backlog', 'wishlist', 'stopped', 'finished', 'completed'];
+// "Gespeeld" is de groep op de info-pagina; daarbinnen kies je hoe ver: gespeeld, verhaal uitgespeeld of 100%
+const PLAYED = ['stopped', 'finished', 'completed'];
+const PLAYED_LEVELS = [['stopped', 'Gespeeld'], ['finished', 'Verhaal uitgespeeld'], ['completed', '100%']];
 const listById = Object.fromEntries(LISTS.map(l => [l.id, l]));
 // Veilig opzoeken: een onbekende lijst (bv. 'interested' via sync van een oud toestel) mag nooit een crash geven
 const listOf = (id) => listById[id] || listById.wishlist;
@@ -460,11 +466,13 @@ function showView(id) {
   document.querySelectorAll('.view').forEach(v => { v.hidden = v.id !== id; });
 }
 
-function setHeader(title, meta = '', { back = false, sort = false } = {}) {
+function setHeader(title, meta = '', { back = false, sort = false, filter = false } = {}) {
   $('#viewTitle').textContent = title;
   $('#viewMeta').textContent = meta;
   $('#backBtn').hidden = !back;
   $('#sortBtn').hidden = !sort;
+  $('#libFilter').hidden = !filter;
+  if (!filter && $('#popover')?.dataset.mode === 'lib') closePopover();
 }
 
 function render() {
@@ -507,7 +515,7 @@ function renderLibrary() {
     const cover = lastCover(items);
     return `<button data-sub="${id}" class="flex aspect-[1/.85] flex-col justify-between rounded-2xl border p-3 text-left active:scale-[.96]"
         style="background:color-mix(in srgb,${c} 14%,var(--color-surface,#191c23));border-color:color-mix(in srgb,${c} 30%,transparent)">
-      <span class="truncate text-[14px] font-medium text-ink/85">${l.label}</span>
+      <span class="truncate text-[14px] font-medium text-ink/85">${l.tile || l.label}</span>
       <span class="flex items-end justify-between gap-1">
         <b class="text-[32px] font-extrabold leading-none" style="color:${c}">${items.length}</b>
         ${cover ? coverHTML(cover, { cls: 'w-9 flex-none rounded-md! shadow-md!', placeholder: false, w: THUMB_W }) : `<span class="pb-1 [&_svg]:size-4">${ICONS.chevron}</span>`}
@@ -575,21 +583,74 @@ function sortGames(list) {
   });
 }
 
+// ---------- Bibliotheek: filter op franchise ----------
+// Franchise van een eigen game: zoals in de gamedatabase (zelfde namen als in Ontdek), anders wat bij de game staat
+const franchiseOf = (g) => (g.sourceKey && getEntry(g.sourceKey)?.franchise) || g.franchise || null;
+if (!Array.isArray(prefs.libFranchises)) prefs.libFranchises = [];
+if (!Array.isArray(prefs.libStatuses)) prefs.libStatuses = [];
+let libListId = null;
+// Lijsten (status) die in "Alle games" voorkomen, met aantal, in de vaste volgorde van de bibliotheek
+function libStatusCounts(list = libListItems) {
+  if (libListId !== 'all') return [];
+  const m = new Map();
+  for (const g of list) m.set(g.status, (m.get(g.status) || 0) + 1);
+  return LIBRARY_ORDER.filter(id => m.has(id)).map(id => [id, m.get(id)]);
+}
+const activeLibStatuses = (list = libListItems) => {
+  const present = new Set(libStatusCounts(list).map(([id]) => id));
+  return prefs.libStatuses.filter(id => present.has(id));
+};
+let libListItems = []; // games van de open lijst vóór het filter (voor de keuzes in de popover)
+// Franchises die in deze lijst voorkomen, met aantal (meeste eerst)
+function libFranchiseCounts(list = libListItems) {
+  const m = new Map();
+  for (const g of list) { const f = franchiseOf(g); if (f) m.set(f, (m.get(f) || 0) + 1); }
+  return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'nl'));
+}
+// Alleen gekozen franchises die in deze lijst voorkomen tellen mee (anders zou een lege lijst verschijnen)
+const activeLibFranchises = (list = libListItems) => {
+  const present = new Set(libFranchiseCounts(list).map(([f]) => f));
+  return prefs.libFranchises.filter(f => present.has(f));
+};
+
 function renderList(listId) {
   const list = listById[listId] || { label: 'Alle games', empty: 'Je bibliotheek is nog leeg.' };
   let items = sortGames(listId === 'all' ? games : games.filter(g => g.status === listId));
+  libListItems = items;
+  libListId = listId;
+  const active = activeLibFranchises(items);
+  const activeSt = activeLibStatuses(items);
+  const total = items.length;
+  if (active.length) items = items.filter(g => active.includes(franchiseOf(g)));
+  if (activeSt.length) items = items.filter(g => activeSt.includes(g.status));
   // Op de wishlist staan aankomende games bovenaan, op volgorde van release
   if (listId === 'wishlist') {
     const up = items.filter(g => isFuture(g.release) || g.release === today()).sort((a, b) => String(a.release).localeCompare(String(b.release)));
     items = [...up, ...items.filter(g => !up.includes(g))];
   }
   const avg = average(items);
-  setHeader(list.label, `${items.length} ${items.length === 1 ? 'game' : 'games'}${avg ? ` · gem. ${avg}` : ''}`, { back: true, sort: true });
+  const filterNames = [...activeSt.map(id => listOf(id).label), ...active];
+  const countText = filterNames.length ? `${items.length} van ${total} · ${filterNames.join(', ')}` : `${items.length} ${items.length === 1 ? 'game' : 'games'}`;
+  const canFilter = libFranchiseCounts(libListItems).length > 0 || libStatusCounts(libListItems).length > 1;
+  setHeader(list.label, `${countText}${avg ? ` · gem. ${avg}` : ''}`, { back: true, sort: true, filter: canFilter });
+  const lf = $('#libFilter');
+  lf.setAttribute('aria-pressed', filterNames.length > 0);
+  lf.querySelector('[data-filter-count]').hidden = !filterNames.length;
+  lf.querySelector('[data-filter-count]').textContent = filterNames.length;
   $('#sortSelect').value = prefs.sort;
   showView('listView');
   const el = $('#listView');
+  // Alle games: per lijst een kopje (Speel ik, Op de plank, …), binnen elke lijst de gekozen sortering
+  const grouped = () => LIBRARY_ORDER.map(id => {
+    const part = items.filter(g => g.status === id);
+    if (!part.length) return '';
+    return `<div class="col-span-full mt-3 flex items-center gap-2 first:mt-0">
+        <span class="size-2.5 flex-none rounded-full" style="background:${LIST_COLORS[id]}"></span>
+        <h3 class="text-[17px] font-bold">${listOf(id).label}</h3><span class="text-[13px] text-muted">${part.length}</span></div>`
+      + part.map(g => cardHTML(g)).join('');
+  }).join('') + items.filter(g => !LIBRARY_ORDER.includes(g.status)).map(g => cardHTML(g)).join('');
   el.innerHTML = items.length
-    ? items.map(g => cardHTML(g)).join('')
+    ? (listId === 'all' ? grouped() : items.map(g => cardHTML(g)).join(''))
     : `<div class="col-span-full px-6 py-16 text-center text-muted [&_svg]:mx-auto [&_svg]:mb-2 [&_svg]:size-11 [&_svg]:opacity-50">
         ${ICONS[listId] || ICONS.all}<div>${list.empty}</div>
         <button data-tab="discover" class="mt-4 rounded-full bg-surface-2 px-4 py-2 font-semibold text-ink">Games ontdekken</button>
@@ -1131,14 +1192,49 @@ function renderPopover() {
     + head('Platform') + FILTER_PLATFORMS.map(row).join('');
 }
 
-function openPopover(btn) {
+function renderLibPopover() {
+  const pop = $('#popover');
+  const active = activeLibFranchises();
+  const row = ([f, n]) => {
+    const on = active.includes(f);
+    return `<button data-lf="${esc(f)}" role="menuitemcheckbox" aria-checked="${on}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] font-semibold active:bg-surface ${on ? 'text-ink' : 'text-muted'}">
+      <span class="grid size-5 flex-none place-items-center rounded-md ${on ? 'bg-accent text-white' : 'ring-2 ring-line ring-inset'} [&_svg]:size-3.5 [&_svg]:stroke-[3.5]">${on ? svg('<path d="M20 6 9 17l-5-5"/>') : ''}</span>
+      <span class="min-w-0 flex-1 truncate">${esc(f)}</span><span class="text-[13px] font-medium text-muted">${n}</span></button>`;
+  };
+  const activeSt = activeLibStatuses();
+  const stRow = ([id, n]) => {
+    const on = activeSt.includes(id);
+    return `<button data-ls="${id}" role="menuitemcheckbox" aria-checked="${on}" class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[15px] font-semibold active:bg-surface ${on ? 'text-ink' : 'text-muted'}">
+      <span class="grid size-5 flex-none place-items-center rounded-md ${on ? 'bg-accent text-white' : 'ring-2 ring-line ring-inset'} [&_svg]:size-3.5 [&_svg]:stroke-[3.5]">${on ? svg('<path d="M20 6 9 17l-5-5"/>') : ''}</span>
+      <span class="size-2 flex-none rounded-full" style="background:${LIST_COLORS[id]}"></span>
+      <span class="min-w-0 flex-1 truncate">${listOf(id).label}</span><span class="text-[13px] font-medium text-muted">${n}</span></button>`;
+  };
+  const head = (t, extra = '') => `<div class="flex items-center justify-between px-3 pb-1 pt-1.5"><b class="text-[13px] uppercase tracking-wider text-muted">${t}</b>${extra}</div>`;
+  const clear = active.length || activeSt.length ? '<button data-lf-clear class="text-[13px] font-semibold text-accent">Alles tonen</button>' : '';
+  const statuses = libStatusCounts();
+  const franchises = libFranchiseCounts();
+  pop.innerHTML = (statuses.length > 1 ? head('Lijst', clear) + statuses.map(stRow).join('') : '')
+    + (statuses.length > 1 && franchises.length ? '<div class="mx-3 my-1.5 h-px bg-line"></div>' : '')
+    + (franchises.length ? head('Franchise', statuses.length > 1 ? '' : clear) + franchises.map(row).join('') : '');
+}
+
+function setLibFranchises(list, statuses = prefs.libStatuses) {
+  prefs.libFranchises = list;
+  prefs.libStatuses = statuses;
+  savePrefs();
+  render(); // de open lijst opnieuw met het filter
+  if ($('#popover')?.dataset.mode === 'lib') renderLibPopover();
+}
+
+function openPopover(btn, mode = 'browse') {
   closePopover();
   const pop = document.createElement('div');
   pop.id = 'popover';
+  pop.dataset.mode = mode;
   pop.setAttribute('role', 'menu');
   pop.className = 'no-scrollbar fixed z-30 w-60 animate-fade overflow-y-auto rounded-2xl bg-surface-2 p-1.5 shadow-2xl shadow-black/60 ring-1 ring-line';
   document.body.append(pop);
-  renderPopover();
+  if (mode === 'lib') renderLibPopover(); else renderPopover();
   // Onder het knopje, rechts uitgelijnd; past het er niet onder, dan zo hoog als er ruimte is
   const r = btn.getBoundingClientRect();
   pop.style.top = `${r.bottom + 8}px`;
@@ -1148,12 +1244,27 @@ function openPopover(btn) {
 }
 function closePopover() {
   $('#popover')?.remove();
-  document.querySelectorAll('[data-platform-filter]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+  document.querySelectorAll('[data-platform-filter], [data-lib-filter]').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
 document.addEventListener('click', (e) => {
   const fb = e.target.closest('[data-platform-filter]');
   if (fb) { e.stopPropagation(); $('#popover') ? closePopover() : openPopover(fb); return; }
+  const lb = e.target.closest('[data-lib-filter]');
+  if (lb) { e.stopPropagation(); $('#popover') ? closePopover() : openPopover(lb, 'lib'); return; }
+  const lf = e.target.closest('[data-lf]');
+  if (lf) {
+    const f = lf.dataset.lf, act = activeLibFranchises();
+    setLibFranchises(act.includes(f) ? act.filter(x => x !== f) : [...act, f]);
+    return;
+  }
+  const ls = e.target.closest('[data-ls]');
+  if (ls) {
+    const id = ls.dataset.ls, act = activeLibStatuses();
+    setLibFranchises(prefs.libFranchises, act.includes(id) ? act.filter(x => x !== id) : [...act, id]);
+    return;
+  }
+  if (e.target.closest('[data-lf-clear]')) { setLibFranchises([], []); return; }
   const pf = e.target.closest('[data-pf]');
   if (pf) {
     const p = pf.dataset.pf;
@@ -1174,7 +1285,7 @@ updateFilterButtons();
 
 // ---------- Swipen: wat heb ik gespeeld? ----------
 // Per franchise een stapel kaarten: naar rechts = uitgespeeld (komt in Uitgespeeld, zonder datum),
-// omhoog = gespeeld maar niet uitgespeeld (komt in Gestopt), naar links = niet gespeeld (wordt niet
+// omhoog = gespeeld maar niet uitgespeeld (komt in Gespeeld), naar links = niet gespeeld (wordt niet
 // meer gevraagd). Details vul je later zelf aan.
 const SWIPE_TOP = '__top';
 const swipe = { set: null, queue: [], history: [], yes: 0, part: 0, no: 0, busy: false };
@@ -1227,7 +1338,7 @@ function renderSwipePicker() {
   const el = $('#swipeBody');
   el.innerHTML = `
     <p class="mb-3 text-[13px] text-muted">Veeg naar <b class="text-[#4fd18b]">rechts</b> als je een game gespeeld hebt, naar <b class="text-[#ff5c5c]">links</b> als niet.
-      Rechts = <b class="text-ink">Uitgespeeld</b>, omhoog = gespeeld maar niet uitgespeeld (<b class="text-ink">Gestopt</b>), links = niet gespeeld. Cijfer en details vul je later aan.</p>
+      Rechts = <b class="text-ink">Uitgespeeld</b>, omhoog = gespeeld maar niet uitgespeeld (<b class="text-ink">Gespeeld</b>), links = niet gespeeld. Cijfer en details vul je later aan.</p>
     <div class="grid grid-cols-2 gap-2.5 pb-6 lg:grid-cols-4">${sets.map(tile).join('')}</div>`;
   el.scrollTop = 0;
   hydrate(el);
@@ -1280,7 +1391,7 @@ function swipeResultHTML() {
   const h = swipe.history[swipe.history.length - 1];
   if (!h) return '<div id="swipeResult" class="h-7"></div>';
   const k = SWIPE_KINDS[h.choice];
-  const where = h.choice === 'yes' ? '→ Uitgespeeld' : h.choice === 'up' ? '→ Gestopt' : '';
+  const where = h.choice === 'yes' ? '→ Uitgespeeld' : h.choice === 'up' ? '→ Gespeeld' : '';
   return `<div id="swipeResult" class="swipe-result mx-auto flex h-7 max-w-full items-center gap-1.5 rounded-full px-3 text-[13px] font-semibold" style="background:${k.color}26;color:${k.color}">
     <span class="flex-none [&_svg]:size-4 [&_svg]:stroke-[3]">${svg(k.icon)}</span>
     <span class="truncate text-ink">${esc(h.e.title)}</span><span class="flex-none">${where || k.label}</span></div>`;
@@ -1439,7 +1550,7 @@ function showSwiped(choice) {
   const yes = choice === 'yes';
   hideScreen($('#swipeScreen'), { animate: false });
   openFolder(`${swipeName(swipe.set)}: ${yes ? 'uitgespeeld' : 'gespeeld'}`, list,
-    `${list.length} ${list.length === 1 ? 'game' : 'games'} · ${yes ? 'staan in Uitgespeeld' : 'niet uitgespeeld, staan in Gestopt'}`, { owned: true });
+    `${list.length} ${list.length === 1 ? 'game' : 'games'} · ${yes ? 'staan in Uitgespeeld' : 'niet uitgespeeld, staan in Gespeeld'}`, { owned: true });
 }
 
 function swipeUndo() {
@@ -1819,16 +1930,27 @@ function renderDetail() {
   // Nog niet uit: spelen, uitspelen of ermee stoppen kan nog niet
   const notOut = isFuture(g.release);
   const cur = owned ? g.status : null;
-  const statusBtns = `<div class="grid grid-cols-3 gap-1.5">${STATUS_ORDER.map(id => {
-    const on = cur === id;
-    // Gedimd: spelen/uitspelen/stoppen vóór de release, of de wishlist als je de game al hebt
+  // Vier hoofdknoppen; "Gespeeld" is een groep: staat de game daarin, dan kies je eronder hoe ver
+  // (gespeeld / verhaal uitgespeeld / 100%). Altijd op dezelfde plek, niets verspringt.
+  const inPlayed = PLAYED.includes(cur);
+  const mainBtn = (id) => {
+    const group = id === 'stopped';
+    const on = group ? inPlayed : cur === id;
+    // Gedimd: spelen/uitspelen vóór de release, of de wishlist als je de game al hebt
     const off = !on && ((notOut && NEEDS_RELEASE.includes(id)) || (id === 'wishlist' && cur && cur !== 'wishlist'));
-    const c = LIST_COLORS[id];
-    const text = notOut && id === 'backlog' ? 'Besteld' : listById[id].label;
-    return `<button data-status="${id}" aria-pressed="${on}" ${off ? 'disabled' : ''} style="--c:${c}"
+    const c = group && inPlayed ? LIST_COLORS[cur] : LIST_COLORS[id];
+    const text = notOut && id === 'backlog' ? 'Besteld' : group ? 'Gespeeld' : listById[id].label;
+    // Groepsknop als hij al aan staat: niets doen (anders zou "Uitgespeeld" terugvallen naar "Gespeeld")
+    const attr = group && inPlayed ? 'data-played-group' : `data-status="${id}"`;
+    return `<button ${attr} aria-pressed="${on}" ${off ? 'disabled' : ''} style="--c:${c}"
       class="status-btn flex h-[62px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-[12px] font-semibold [&_svg]:size-5 ${on ? 'is-on' : ''}">
-      ${ICONS[id]}<span class="max-w-full truncate">${esc(text)}</span></button>`;
-  }).join('')}</div>`;
+      ${ICONS[group && inPlayed ? cur : id]}<span class="max-w-full truncate">${esc(text)}</span></button>`;
+  };
+  const levels = inPlayed ? `<div class="mt-2 grid grid-cols-3 gap-1 rounded-xl bg-surface p-1">${PLAYED_LEVELS.map(([id, text]) => {
+    const on = cur === id;
+    return `<button data-status="${id}" aria-pressed="${on}" class="min-w-0 rounded-lg px-1 py-2 text-[12.5px] font-semibold transition-colors ${on ? 'text-bg' : 'text-muted active:bg-surface-2'}" ${on ? `style="background:${LIST_COLORS[id]}"` : ''}>${esc(text)}</button>`;
+  }).join('')}</div>` : '';
+  const statusBtns = `<div class="grid grid-cols-4 gap-1.5">${['wishlist', 'backlog', 'playing', 'stopped'].map(mainBtn).join('')}</div>${levels}`;
 
   const ratingBtns = Array.from({ length: 11 }, (_, i) => {
     // Alleen het gekozen cijfer vol; de lagere licht getint (je ziet nog hoe 'vol' het is), de rest neutraal

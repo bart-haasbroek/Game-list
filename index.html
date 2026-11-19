@@ -77,6 +77,11 @@
           <div id="viewMeta" class="truncate text-[13px] text-muted"></div>
         </div>
       </div>
+      <!-- Bibliotheeklijsten: filter op franchise (alleen franchises die in de lijst voorkomen) -->
+      <button id="libFilter" data-lib-filter aria-label="Filter op franchise" aria-haspopup="dialog" class="relative grid size-10 flex-none place-items-center rounded-full text-ink active:bg-surface-2 aria-pressed:bg-surface aria-pressed:text-accent aria-pressed:ring-2 aria-pressed:ring-accent/60" hidden>
+        <svg viewBox="0 0 24 24" class="size-[20px]!"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        <span data-filter-count class="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-white" hidden></span>
+      </button>
       <label id="sortBtn" class="relative grid size-10 flex-none place-items-center rounded-full active:bg-surface-2" aria-label="Sorteren" hidden>
         <svg viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>
         <select id="sortSelect" class="absolute inset-0 text-base opacity-0">
